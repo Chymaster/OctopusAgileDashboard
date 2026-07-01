@@ -2,6 +2,7 @@ package com.example.octopusdashboard.ui.home
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.octopusdashboard.data.prefs.UserPreferencesRepository
 import com.example.octopusdashboard.data.repository.GreenEnergyRepository
 import com.example.octopusdashboard.data.repository.OctopusRepository
 import com.example.octopusdashboard.domain.model.AgilePrice
@@ -15,6 +16,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.time.Instant
@@ -35,7 +37,8 @@ data class HomeUiState(
 @HiltViewModel
 class HomeViewModel @Inject constructor(
     private val repository: OctopusRepository,
-    private val greenEnergyRepository: GreenEnergyRepository
+    private val greenEnergyRepository: GreenEnergyRepository,
+    private val preferencesRepository: UserPreferencesRepository
 ) : ViewModel() {
 
     private val londonZone = ZoneId.of("Europe/London")
@@ -55,9 +58,21 @@ class HomeViewModel @Inject constructor(
         refreshJob = loadAllData()
     }
 
+    companion object {
+        /** 30 days in milliseconds — cache TTL for the flexible price. */
+        private const val FLEXIBLE_CACHE_TTL_MS = 30L * 24 * 60 * 60 * 1000
+    }
+
     private fun loadAllData(): Job {
         return viewModelScope.launch {
             _uiState.update { it.copy(isRefreshing = true, error = null) }
+
+            // Immediately show cached flexible price if available (and within TTL)
+            val cachedPrice = preferencesRepository.cachedFlexiblePriceFlow.first()
+            val cachedTimestamp = preferencesRepository.cachedFlexiblePriceTimestampFlow.first()
+            if (cachedPrice != null && System.currentTimeMillis() - cachedTimestamp < FLEXIBLE_CACHE_TTL_MS) {
+                _uiState.update { it.copy(flexiblePrice = cachedPrice) }
+            }
 
             // Calculate time window: 2 hours ago to 4 hours ahead
             val now = Instant.now()
@@ -105,6 +120,7 @@ class HomeViewModel @Inject constructor(
 
                 flexibleJob.await().onSuccess { price ->
                     _uiState.update { it.copy(flexiblePrice = price) }
+                    preferencesRepository.saveFlexiblePriceCache(price)
                 }.onFailure { e ->
                     android.util.Log.w("HomeViewModel", "Failed to fetch flexible price", e)
                 }

@@ -17,10 +17,9 @@ class RefreshDashboardDataUseCase @Inject constructor(
             val prices = pricesResult.await()
             val consumption = consumptionResult.await()
 
+            // Prices are required; consumption is optional (needs personal credentials)
             if (prices.isFailure) {
                 Result.failure(prices.exceptionOrNull() ?: Exception("Failed to refresh prices"))
-            } else if (consumption.isFailure) {
-                Result.failure(consumption.exceptionOrNull() ?: Exception("Failed to refresh consumption"))
             } else {
                 Result.success(Unit)
             }

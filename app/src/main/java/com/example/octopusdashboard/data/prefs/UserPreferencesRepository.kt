@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.doublePreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -36,6 +37,8 @@ class UserPreferencesRepository @Inject constructor(
         val FLEXIBLE_PRODUCT_CODE = stringPreferencesKey("flexible_product_code")
         val LAST_PRICES_REFRESH = longPreferencesKey("last_prices_refresh")
         val LAST_CONSUMPTION_REFRESH = longPreferencesKey("last_consumption_refresh")
+        val CACHED_FLEXIBLE_PRICE = doublePreferencesKey("cached_flexible_price")
+        val CACHED_FLEXIBLE_PRICE_TIMESTAMP = longPreferencesKey("cached_flexible_price_timestamp")
     }
 
     val apiKeyFlow: Flow<String?> = dataStore.data.map { it[API_KEY] }
@@ -49,14 +52,14 @@ class UserPreferencesRepository @Inject constructor(
         !key.isNullOrBlank() && !mpan.isNullOrBlank() && !serial.isNullOrBlank()
     }
 
-    val tariffConfig: Flow<TariffConfig?> = combine(productCodeFlow, gspFlow) { product, gsp ->
-        if (!product.isNullOrBlank() && !gsp.isNullOrBlank()) {
-            TariffConfig(
-                productCode = product,
-                tariffCode = "E-1R-$product-${gsp.removePrefix("_")}",
-                gsp = gsp
-            )
-        } else null
+    val tariffConfig: Flow<TariffConfig> = combine(productCodeFlow, gspFlow) { product, gsp ->
+        val effectiveProduct = product?.takeIf { it.isNotBlank() } ?: Constants.DEFAULT_PRODUCT_CODE
+        val effectiveGsp = gsp?.takeIf { it.isNotBlank() } ?: Constants.DEFAULT_GSP
+        TariffConfig(
+            productCode = effectiveProduct,
+            tariffCode = "E-1R-$effectiveProduct-${effectiveGsp.removePrefix("_")}",
+            gsp = effectiveGsp
+        )
     }
 
     suspend fun saveApiKey(apiKey: String) {
@@ -93,6 +96,19 @@ class UserPreferencesRepository @Inject constructor(
 
     val lastPricesRefreshFlow: Flow<Long> = dataStore.data.map { it[LAST_PRICES_REFRESH] ?: 0L }
     val lastConsumptionRefreshFlow: Flow<Long> = dataStore.data.map { it[LAST_CONSUMPTION_REFRESH] ?: 0L }
+
+    /** Cached flexible price value, or null if never cached. */
+    val cachedFlexiblePriceFlow: Flow<Double?> = dataStore.data.map { it[CACHED_FLEXIBLE_PRICE] }
+
+    /** Epoch millis when the flexible price was last fetched from the API. */
+    val cachedFlexiblePriceTimestampFlow: Flow<Long> = dataStore.data.map { it[CACHED_FLEXIBLE_PRICE_TIMESTAMP] ?: 0L }
+
+    suspend fun saveFlexiblePriceCache(price: Double) {
+        dataStore.edit { prefs ->
+            prefs[CACHED_FLEXIBLE_PRICE] = price
+            prefs[CACHED_FLEXIBLE_PRICE_TIMESTAMP] = System.currentTimeMillis()
+        }
+    }
 
     suspend fun saveCredentials(apiKey: String, mpan: String, serialNumber: String, gsp: String, productCode: String) {
         dataStore.edit { prefs ->

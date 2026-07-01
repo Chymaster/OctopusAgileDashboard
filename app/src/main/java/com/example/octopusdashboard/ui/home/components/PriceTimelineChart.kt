@@ -21,6 +21,7 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
@@ -41,6 +42,7 @@ private val timeFormatter = DateTimeFormatter.ofPattern("HH:mm", Locale.UK)
 fun PriceTimelineChart(
     prices: List<AgilePrice>,
     currentPriceStartTime: Instant?,
+    referencePrice: Double? = null,
     modifier: Modifier = Modifier
 ) {
     val labelColor = MaterialTheme.colorScheme.onSurfaceVariant
@@ -94,7 +96,7 @@ fun PriceTimelineChart(
                 ) {
                     val chartLeft = 36.dp.toPx()
                     val chartRight = size.width - 4.dp.toPx()
-                    val chartTop = 8.dp.toPx()
+                    val chartTop = 20.dp.toPx()
                     val chartBottom = size.height - 24.dp.toPx()
                     val chartWidth = chartRight - chartLeft
                     val chartHeight = chartBottom - chartTop
@@ -138,20 +140,43 @@ fun PriceTimelineChart(
                         val barTop = chartBottom - barHeight
 
                         drawRoundRect(
-                            color = PriceColors.priceColor(price),
+                            color = PriceColors.priceColor(price, referencePrice),
                             topLeft = Offset(x, barTop),
                             size = Size(barWidth, barHeight),
                             cornerRadius = CornerRadius(2.dp.toPx(), 2.dp.toPx())
                         )
 
                         if (isCurrent) {
-                            drawRoundRect(
-                                color = primaryColor,
-                                topLeft = Offset(x - 1.dp.toPx(), barTop - 1.dp.toPx()),
-                                size = Size(barWidth + 2.dp.toPx(), barHeight + 2.dp.toPx()),
-                                cornerRadius = CornerRadius(3.dp.toPx(), 3.dp.toPx()),
-                                style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round)
+                            // "now" indicator: text + downward arrow above the bar
+                            val arrowCenterX = x + barWidth / 2
+                            val minArrowTipY = 18.dp.toPx()
+                            val arrowTipY = maxOf(barTop - 4.dp.toPx(), minArrowTipY)
+                            val arrowBaseY = arrowTipY - 8.dp.toPx()
+                            val arrowHalfWidth = 5.dp.toPx()
+
+                            // "now" text above the arrow
+                            val nowPaint = android.graphics.Paint().apply {
+                                color = primaryColor.hashCode()
+                                textSize = 9.sp.toPx()
+                                textAlign = android.graphics.Paint.Align.CENTER
+                                isAntiAlias = true
+                                isFakeBoldText = true
+                            }
+                            drawContext.canvas.nativeCanvas.drawText(
+                                "now",
+                                arrowCenterX,
+                                arrowBaseY - 2.dp.toPx(),
+                                nowPaint
                             )
+
+                            // Downward-pointing triangle
+                            val path = Path().apply {
+                                moveTo(arrowCenterX, arrowTipY)
+                                lineTo(arrowCenterX - arrowHalfWidth, arrowBaseY)
+                                lineTo(arrowCenterX + arrowHalfWidth, arrowBaseY)
+                                close()
+                            }
+                            drawPath(path, primaryColor)
                         }
 
                         // Tapped bar tooltip

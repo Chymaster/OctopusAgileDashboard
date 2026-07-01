@@ -6,6 +6,9 @@ object Constants {
     const val FLEXIBLE_PRODUCT_CODE = "VAR-22-11-01"
     const val CARBON_INTENSITY_BASE_URL = "https://api.carbonintensity.org.uk/"
 
+    // Default GSP region: _L = London (UK Power Networks)
+    const val DEFAULT_GSP = "_L"
+
     // GSP group letters (Grid Supply Point regions)
     val GSP_GROUPS = listOf(
         "_A", "_B", "_C", "_D", "_E", "_F", "_G", "_H",
