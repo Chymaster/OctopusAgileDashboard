@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -29,6 +30,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.example.octopusdashboard.domain.model.FuelMix
+import com.example.octopusdashboard.ui.theme.BrandColors
 
 /** Colors for each fuel type, matching common UK grid representations. */
 private val FUEL_COLORS = mapOf(
@@ -59,8 +61,9 @@ fun FuelMixPieChart(
     }
 
     Column(
-        modifier = modifier.padding(8.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
     ) {
         Text(
             text = "Grid Mix",
@@ -72,9 +75,11 @@ fun FuelMixPieChart(
 
         Box(
             contentAlignment = Alignment.Center,
-            modifier = Modifier.size(140.dp)
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f, fill = false)
         ) {
-            Canvas(modifier = Modifier.size(140.dp)) {
+            Canvas(modifier = Modifier.fillMaxSize()) {
                 val strokeWidth = 28.dp.toPx()
                 val diameter = size.minDimension - strokeWidth
                 val topLeft = Offset(
@@ -105,14 +110,14 @@ fun FuelMixPieChart(
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
                     text = String.format(java.util.Locale.UK, "%.0f%%", lowCarbonPercentage),
-                    style = MaterialTheme.typography.headlineSmall,
+                    style = MaterialTheme.typography.displaySmall,
                     fontWeight = FontWeight.Bold,
-                    color = Color(0xFF2E7D32),
+                    color = BrandColors.LowCarbonGreen,
                     textAlign = TextAlign.Center
                 )
                 Text(
-                    text = "Low C",
-                    style = MaterialTheme.typography.labelSmall,
+                    text = "Low carbon",
+                    style = MaterialTheme.typography.bodySmall,
                     color = labelColor,
                     textAlign = TextAlign.Center
                 )
@@ -148,15 +153,15 @@ private fun LegendItem(
     modifier: Modifier = Modifier
 ) {
     Row(
-        modifier = modifier.padding(horizontal = 3.dp, vertical = 1.dp),
+        modifier = modifier.padding(horizontal = 4.dp, vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Surface(
-            modifier = Modifier.size(5.dp),
+            modifier = Modifier.size(6.dp),
             shape = CircleShape,
             color = color
         ) {}
-        Spacer(modifier = Modifier.width(2.dp))
+        Spacer(modifier = Modifier.width(3.dp))
         Text(
             text = String.format(java.util.Locale.UK, "%s %.0f%%", label, percentage),
             style = MaterialTheme.typography.labelSmall,

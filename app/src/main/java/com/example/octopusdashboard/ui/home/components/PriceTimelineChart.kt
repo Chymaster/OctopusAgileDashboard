@@ -4,6 +4,8 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -58,7 +60,7 @@ fun PriceTimelineChart(
     // Tapped bar index for tooltip
     var tappedIndex by remember { mutableStateOf<Int?>(null) }
 
-    Column(modifier = modifier.padding(horizontal = 4.dp)) {
+    Column(modifier = modifier) {
         Text(
             text = "Price Timeline (2h ago → 4h ahead)",
             style = MaterialTheme.typography.labelMedium,
@@ -67,11 +69,11 @@ fun PriceTimelineChart(
         )
 
         if (sortedPrices.isNotEmpty()) {
-            Box {
+            Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
                 Canvas(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(200.dp)
+                        .fillMaxHeight()
                         .padding(start = 4.dp, end = 8.dp, top = 4.dp, bottom = 4.dp)
                         .pointerInput(sortedPrices) {
                             detectTapGestures { offset ->

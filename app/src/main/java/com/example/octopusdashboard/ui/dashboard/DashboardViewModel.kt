@@ -10,11 +10,13 @@ import com.example.octopusdashboard.domain.model.TimeRangePreset
 import com.example.octopusdashboard.domain.usecase.GetDashboardDataUseCase
 import com.example.octopusdashboard.domain.usecase.RefreshDashboardDataUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.LocalDate
@@ -52,6 +54,8 @@ class DashboardViewModel @Inject constructor(
         DateRangeSelection.Preset(TimeRangePreset.TODAY)
     )
 
+    private var dataJob: Job? = null
+
     init {
         viewModelScope.launch {
             _selectedRange.collectLatest { range ->
@@ -65,41 +69,46 @@ class DashboardViewModel @Inject constructor(
     }
 
     fun onRefresh() {
+        dataJob?.cancel()
         val range = _selectedRange.value
-        viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isRefreshing = true, error = null)
+        dataJob = viewModelScope.launch {
+            _uiState.update { it.copy(isRefreshing = true, error = null) }
             val (start, end) = getDateRange(range)
             val result = refreshDashboardDataUseCase(start, end)
             if (result.isFailure) {
-                _uiState.value = _uiState.value.copy(
-                    isRefreshing = false,
-                    error = result.exceptionOrNull()?.message ?: "Refresh failed"
-                )
+                _uiState.update {
+                    it.copy(
+                        isRefreshing = false,
+                        error = result.exceptionOrNull()?.message ?: "Refresh failed"
+                    )
+                }
             } else {
-                _uiState.value = _uiState.value.copy(isRefreshing = false)
+                _uiState.update { it.copy(isRefreshing = false) }
             }
         }
     }
 
     fun onPointTapped(point: BinnedPoint?) {
-        _uiState.value = _uiState.value.copy(selectedBinnedPoint = point)
+        _uiState.update { it.copy(selectedBinnedPoint = point) }
     }
 
     fun clearError() {
-        _uiState.value = _uiState.value.copy(error = null)
+        _uiState.update { it.copy(error = null) }
     }
 
-    private fun loadData(range: DateRangeSelection) {
-        viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(
-                isLoading = _uiState.value.points.isEmpty(),
-                error = null,
-                selectedRange = range
-            )
+    private fun loadData(range: DateRangeSelection): Job {
+        return viewModelScope.launch {
+            _uiState.update {
+                it.copy(
+                    isLoading = it.points.isEmpty(),
+                    error = null,
+                    selectedRange = range
+                )
+            }
             val (start, end) = getDateRange(range)
 
             // Start observing Room cache immediately — shows cached data right away
-            val observeJob = launch {
+            launch {
                 getDashboardDataUseCase(start, end).collectLatest { points ->
                     val prices = points.mapNotNull { it.priceIncVat }
                     val totalCost = points.sumOf { it.costIncVat ?: 0.0 }
@@ -107,25 +116,27 @@ class DashboardViewModel @Inject constructor(
                     // Usage-weighted average: total cost / total usage
                     val avgPrice = if (totalKwh > 0) totalCost / totalKwh else null
 
-                    _uiState.value = _uiState.value.copy(
-                        isLoading = false,
-                        points = points,
-                        error = null,
-                        totalCost = if (totalKwh > 0) totalCost else null,
-                        totalKwh = if (totalKwh > 0) totalKwh else null,
-                        avgPrice = avgPrice,
-                        minPrice = prices.minOrNull(),
-                        maxPrice = prices.maxOrNull()
-                    )
+                    _uiState.update {
+                        it.copy(
+                            isLoading = false,
+                            points = points,
+                            error = null,
+                            totalCost = if (totalKwh > 0) totalCost else null,
+                            totalKwh = if (totalKwh > 0) totalKwh else null,
+                            avgPrice = avgPrice,
+                            minPrice = prices.minOrNull(),
+                            maxPrice = prices.maxOrNull()
+                        )
+                    }
                 }
             }
 
             // Refresh from API in background — Room observation will auto-update when data arrives
             val refreshResult = refreshDashboardDataUseCase(start, end)
             if (refreshResult.isFailure && _uiState.value.points.isEmpty()) {
-                _uiState.value = _uiState.value.copy(
-                    error = refreshResult.exceptionOrNull()?.message ?: "Failed to refresh"
-                )
+                _uiState.update {
+                    it.copy(error = refreshResult.exceptionOrNull()?.message ?: "Failed to refresh")
+                }
             }
         }
     }

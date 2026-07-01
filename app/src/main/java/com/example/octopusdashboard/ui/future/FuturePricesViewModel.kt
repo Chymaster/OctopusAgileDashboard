@@ -5,10 +5,12 @@ import androidx.lifecycle.viewModelScope
 import com.example.octopusdashboard.data.repository.OctopusRepository
 import com.example.octopusdashboard.domain.model.AgilePrice
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.LocalDate
@@ -32,17 +34,20 @@ class FuturePricesViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(FuturePricesUiState())
     val uiState: StateFlow<FuturePricesUiState> = _uiState.asStateFlow()
 
+    private var dataJob: Job? = null
+
     init {
-        loadData()
+        dataJob = loadData()
     }
 
     fun onRefresh() {
-        loadData()
+        dataJob?.cancel()
+        dataJob = loadData()
     }
 
-    private fun loadData() {
-        viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isRefreshing = true, error = null)
+    private fun loadData(): Job {
+        return viewModelScope.launch {
+            _uiState.update { it.copy(isRefreshing = true, error = null) }
 
             val now = LocalDate.now(londonZone)
             // Range: 2 days ago → tomorrow (covers past 2 days + future prices from API)
@@ -52,22 +57,26 @@ class FuturePricesViewModel @Inject constructor(
             // Start observing cached data immediately
             launch {
                 repository.observeAgilePrices(start, end).collectLatest { prices ->
-                    _uiState.value = _uiState.value.copy(
-                        isLoading = false,
-                        isRefreshing = false,
-                        prices = prices.sortedBy { it.validFrom },
-                        error = null
-                    )
+                    _uiState.update {
+                        it.copy(
+                            isLoading = false,
+                            isRefreshing = false,
+                            prices = prices.sortedBy { it.validFrom },
+                            error = null
+                        )
+                    }
                 }
             }
 
             // Refresh from API in background
             val result = repository.refreshAgilePrices(start, end)
             if (result.isFailure && _uiState.value.prices.isEmpty()) {
-                _uiState.value = _uiState.value.copy(
-                    isRefreshing = false,
-                    error = result.exceptionOrNull()?.message ?: "Failed to load prices"
-                )
+                _uiState.update {
+                    it.copy(
+                        isRefreshing = false,
+                        error = result.exceptionOrNull()?.message ?: "Failed to load prices"
+                    )
+                }
             }
         }
     }
