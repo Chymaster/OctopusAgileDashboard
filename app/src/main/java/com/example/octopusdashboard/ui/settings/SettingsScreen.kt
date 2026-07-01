@@ -103,6 +103,12 @@ fun SettingsScreen(
                 style = MaterialTheme.typography.titleMedium
             )
 
+            Text(
+                text = "Optional — needed only for consumption data on the Dashboard",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
             // API Key
             OutlinedTextField(
                 value = uiState.apiKey,

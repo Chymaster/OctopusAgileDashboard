@@ -123,7 +123,7 @@ fun HomeScreen(
                             .fillMaxSize()
                             .padding(16.dp)
                     ) {
-                        // Top section: Gauge (1) on left + GridMix (1.6) on right, side by side
+                        // Top section: Gauge (4) on left + GridMix (6) on right, side by side
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -134,7 +134,7 @@ fun HomeScreen(
                                 shape = cardShape,
                                 modifier = Modifier
                                     .fillMaxHeight()
-                                    .weight(1f)
+                                    .weight(2f)
                             ) {
                                 PriceGauge(
                                     currentPrice = uiState.currentAgilePrice,
@@ -152,7 +152,7 @@ fun HomeScreen(
                                 shape = cardShape,
                                 modifier = Modifier
                                     .fillMaxHeight()
-                                    .weight(1.6f)
+                                    .weight(3f)
                             ) {
                                 uiState.greenEnergyData?.let { data ->
                                     FuelMixPieChart(
@@ -200,6 +200,7 @@ fun HomeScreen(
                             PriceTimelineChart(
                                 prices = uiState.priceTimeline,
                                 currentPriceStartTime = uiState.currentPriceStartTime,
+                                referencePrice = uiState.flexiblePrice,
                                 modifier = Modifier
                                     .fillMaxSize()
                                     .padding(16.dp)

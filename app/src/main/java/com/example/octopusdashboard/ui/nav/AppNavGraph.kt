@@ -7,7 +7,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
@@ -30,26 +29,18 @@ fun AppNavGraph(
     navController: NavHostController
 ) {
     val hasCredentials by preferencesRepository.hasCredentials.collectAsState(initial = false)
-    val startDestination = if (hasCredentials) Routes.HOME else Routes.SETTINGS
     val scope = rememberCoroutineScope()
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val currentBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = currentBackStackEntry?.destination?.route
 
-    // Navigate to home once credentials are saved
-    LaunchedEffect(hasCredentials) {
-        if (hasCredentials) {
-            navController.navigate(Routes.HOME) {
-                popUpTo(Routes.SETTINGS) { inclusive = true }
-            }
-        }
-    }
-
     ModalNavigationDrawer(
         drawerState = drawerState,
+        gesturesEnabled = false,
         drawerContent = {
             DrawerContent(
                 currentRoute = currentRoute,
+                hasCredentials = hasCredentials,
                 onNavigate = { route ->
                     navController.navigate(route) {
                         // Avoid stacking duplicate destinations
@@ -61,7 +52,7 @@ fun AppNavGraph(
         }
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
-            NavHost(navController = navController, startDestination = startDestination) {
+            NavHost(navController = navController, startDestination = Routes.HOME) {
                 composable(Routes.HOME) {
                     HomeScreen(
                         onOpenDrawer = { scope.launch { drawerState.open() } }
@@ -82,12 +73,8 @@ fun AppNavGraph(
                 }
                 composable(Routes.SETTINGS) {
                     SettingsScreen(
-                        onNavigateBack = {
-                            if (hasCredentials) {
-                                navController.popBackStack()
-                            }
-                        },
-                        showBackButton = hasCredentials
+                        onNavigateBack = { navController.popBackStack() },
+                        showBackButton = true
                     )
                 }
             }

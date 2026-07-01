@@ -18,7 +18,7 @@ data class SettingsUiState(
     val apiKey: String = "",
     val mpan: String = "",
     val serialNumber: String = "",
-    val gsp: String = "",
+    val gsp: String = Constants.DEFAULT_GSP,
     val productCode: String = Constants.DEFAULT_PRODUCT_CODE,
     val flexibleProductCode: String = Constants.FLEXIBLE_PRODUCT_CODE,
     val tariffCode: String = "",
@@ -63,7 +63,7 @@ class SettingsViewModel @Inject constructor(
         }
         viewModelScope.launch {
             preferencesRepository.gspFlow.collect { gsp ->
-                _uiState.value = _uiState.value.copy(gsp = gsp ?: "")
+                _uiState.value = _uiState.value.copy(gsp = gsp ?: Constants.DEFAULT_GSP)
             }
         }
         viewModelScope.launch {
@@ -115,18 +115,6 @@ class SettingsViewModel @Inject constructor(
 
     fun save() {
         val state = _uiState.value
-        if (state.apiKey.isBlank()) {
-            _uiState.value = state.copy(error = "API key is required")
-            return
-        }
-        if (state.mpan.isBlank()) {
-            _uiState.value = state.copy(error = "MPAN is required")
-            return
-        }
-        if (state.serialNumber.isBlank()) {
-            _uiState.value = state.copy(error = "Serial number is required")
-            return
-        }
         if (state.gsp.isBlank()) {
             _uiState.value = state.copy(error = "Please select a region")
             return
@@ -150,11 +138,18 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun testConnection() {
+        val state = _uiState.value
+        if (state.apiKey.isBlank() || state.mpan.isBlank()) {
+            _uiState.value = state.copy(
+                connectionTestState = ConnectionTestState.Error("API key and MPAN are required to test connection")
+            )
+            return
+        }
+
         _uiState.value = _uiState.value.copy(connectionTestState = ConnectionTestState.Testing)
 
         viewModelScope.launch {
             // Save first so the interceptor has the API key
-            val state = _uiState.value
             preferencesRepository.saveCredentials(
                 apiKey = state.apiKey,
                 mpan = state.mpan,

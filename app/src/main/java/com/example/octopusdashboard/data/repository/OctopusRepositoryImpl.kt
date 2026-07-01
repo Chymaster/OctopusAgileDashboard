@@ -97,7 +97,6 @@ class OctopusRepositoryImpl @Inject constructor(
         return withContext(Dispatchers.IO) {
             try {
                 val tariffConfig = preferencesRepository.tariffConfig.first()
-                    ?: return@withContext Result.failure(Exception("Tariff not configured"))
 
                 val startStr = DateTimeFormatter.ISO_INSTANT.format(start)
                 val endStr = DateTimeFormatter.ISO_INSTANT.format(end)
@@ -182,7 +181,7 @@ class OctopusRepositoryImpl @Inject constructor(
         return withContext(Dispatchers.IO) {
             try {
                 val gsp = preferencesRepository.gspFlow.first()
-                    ?: return@withContext Result.failure(Exception("GSP not configured"))
+                    ?: Constants.DEFAULT_GSP
                 val flexibleProduct = preferencesRepository.flexibleProductCodeFlow.first()
                     ?: Constants.FLEXIBLE_PRODUCT_CODE
                 val flexibleTariff = "E-1R-$flexibleProduct-${gsp.removePrefix("_")}"

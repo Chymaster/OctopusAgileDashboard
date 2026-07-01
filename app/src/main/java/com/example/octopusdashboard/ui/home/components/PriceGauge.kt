@@ -64,32 +64,36 @@ fun PriceGauge(
         maxPrice = 40.0
     }
 
-    // Threshold stops for colored arc segments
-    val thresholds = listOf(
-        PriceColors.CHEAP_THRESHOLD to PriceColors.Cheap,
-        PriceColors.MODERATE_THRESHOLD to PriceColors.Moderate,
-        PriceColors.EXPENSIVE_THRESHOLD to PriceColors.Expensive,
-        maxPrice to PriceColors.VeryExpensive
-    ).filter { it.first > minPrice }
+    // Threshold stops for colored arc segments (relative to Flexible Octopus Price)
+    val thresholds = if (referencePrice != null && referencePrice > 0) {
+        listOf(
+            PriceColors.cheapThreshold(referencePrice) to PriceColors.Cheap,
+            PriceColors.moderateThreshold(referencePrice) to PriceColors.Moderate,
+            maxPrice to PriceColors.Expensive
+        ).filter { it.first > minPrice }
+    } else {
+        // Fallback when no reference price — single neutral arc
+        listOf(maxPrice to PriceColors.Moderate)
+    }
 
     Column(
         modifier = modifier,
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
             text = "Agile Price",
             style = MaterialTheme.typography.labelMedium,
-            color = labelColor,
-            modifier = Modifier.padding(bottom = 4.dp)
+            color = labelColor
         )
+
+        Spacer(modifier = Modifier.height(12.dp))
 
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f, fill = false)
-                .aspectRatio(1.2f),
-            contentAlignment = Alignment.BottomCenter
+                .aspectRatio(1f),
+            contentAlignment = Alignment.Center
         ) {
             Canvas(modifier = Modifier.fillMaxSize()) {
                 val strokeWidth = 20.dp.toPx()
@@ -219,10 +223,11 @@ fun PriceGauge(
             }
         }
 
+        Spacer(modifier = Modifier.height(4.dp))
+
         // Text below the gauge — price is the focal point
         Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.padding(top = 4.dp)
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
             if (currentPrice != null) {
                 Text(
@@ -248,24 +253,36 @@ fun PriceGauge(
             }
             if (referencePrice != null) {
                 Spacer(modifier = Modifier.height(2.dp))
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center,
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(8.dp)
-                            .clip(CircleShape)
-                            .background(referenceColor)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
                     Text(
-                        text = String.format(java.util.Locale.UK, "%.1f p/kWh", referencePrice),
+                        text = "Flexible Octopus",
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.tertiary,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center
                     )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(referenceColor)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = String.format(java.util.Locale.UK, "%.1f p/kWh", referencePrice),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.tertiary,
+                            textAlign = TextAlign.Center
+                        )
+                    }
                 }
             }
         }

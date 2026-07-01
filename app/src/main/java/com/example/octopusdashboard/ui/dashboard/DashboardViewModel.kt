@@ -27,9 +27,10 @@ data class DashboardUiState(
     val isLoading: Boolean = true,
     val isRefreshing: Boolean = false,
     val points: List<HalfHourPoint> = emptyList(),
-    val selectedRange: DateRangeSelection = DateRangeSelection.Preset(TimeRangePreset.TODAY),
+    val selectedRange: DateRangeSelection = DateRangeSelection.Preset(TimeRangePreset.SEVEN_DAYS),
     val error: String? = null,
     val selectedBinnedPoint: BinnedPoint? = null,
+    val hasCredentials: Boolean = false,
     // Summary stats
     val totalCost: Double? = null,
     val totalKwh: Double? = null,
@@ -51,12 +52,17 @@ class DashboardViewModel @Inject constructor(
     val uiState: StateFlow<DashboardUiState> = _uiState.asStateFlow()
 
     private val _selectedRange = MutableStateFlow<DateRangeSelection>(
-        DateRangeSelection.Preset(TimeRangePreset.TODAY)
+        DateRangeSelection.Preset(TimeRangePreset.SEVEN_DAYS)
     )
 
     private var dataJob: Job? = null
 
     init {
+        viewModelScope.launch {
+            preferencesRepository.hasCredentials.collect { hasCreds ->
+                _uiState.update { it.copy(hasCredentials = hasCreds) }
+            }
+        }
         viewModelScope.launch {
             _selectedRange.collectLatest { range ->
                 loadData(range)
@@ -146,8 +152,6 @@ class DashboardViewModel @Inject constructor(
         return when (selection) {
             is DateRangeSelection.Preset -> {
                 val start = when (selection.preset) {
-                    TimeRangePreset.TODAY -> now
-                    TimeRangePreset.THREE_DAYS -> now.minusDays(3)
                     TimeRangePreset.SEVEN_DAYS -> now.minusDays(7)
                     TimeRangePreset.ONE_MONTH -> now.minusDays(30)
                     TimeRangePreset.SIX_MONTHS -> now.minusDays(182)

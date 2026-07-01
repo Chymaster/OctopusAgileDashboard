@@ -1,12 +1,15 @@
 package com.example.octopusdashboard.ui.nav
 
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -15,6 +18,7 @@ import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.NavigationDrawerItem
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -22,6 +26,7 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun DrawerContent(
     currentRoute: String?,
+    hasCredentials: Boolean,
     onNavigate: (String) -> Unit,
     onCloseDrawer: () -> Unit,
     modifier: Modifier = Modifier
@@ -50,7 +55,20 @@ fun DrawerContent(
         )
 
         NavigationDrawerItem(
-            label = { Text("Dashboard") },
+            label = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Dashboard")
+                    if (!hasCredentials) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Icon(
+                            Icons.Default.Lock,
+                            contentDescription = "Requires setup",
+                            modifier = Modifier.height(16.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            },
             icon = { Icon(Icons.Default.BarChart, contentDescription = null) },
             selected = currentRoute == Routes.DASHBOARD,
             onClick = {
