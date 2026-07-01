@@ -10,3 +10,4 @@
 local.properties
 *.txt
 screenshot_*.png
+.claude/
