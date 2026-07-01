@@ -4,15 +4,18 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Menu
-import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -54,18 +57,42 @@ fun HomeScreen(
         }
     }
 
+    val cardShape = RoundedCornerShape(16.dp)
+    val cardColors = CardDefaults.cardColors(
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+    )
+
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Octopus Dashboard") },
+                title = {
+                    Column {
+                        Text("Octopus Dashboard")
+                        // TODO: Wire real tariff name and address from user settings
+                        Text(
+                            "Agile Octopus · 14 Linley Rd",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                },
                 navigationIcon = {
                     IconButton(onClick = onOpenDrawer) {
                         Icon(Icons.Default.Menu, contentDescription = "Menu")
                     }
                 },
                 actions = {
+                    // TODO: Wire real lastUpdated timestamp from ViewModel
+                    Text(
+                        "Updated just now",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .align(Alignment.CenterVertically)
+                            .padding(end = 4.dp)
+                    )
                     IconButton(onClick = { viewModel.onRefresh() }) {
-                        Icon(Icons.Default.Refresh, contentDescription = "Refresh")
+                        Icon(Icons.Outlined.Refresh, contentDescription = "Refresh")
                     }
                 }
             )
@@ -94,61 +121,90 @@ fun HomeScreen(
                     Column(
                         modifier = Modifier
                             .fillMaxSize()
-                            .verticalScroll(rememberScrollState())
+                            .padding(16.dp)
                     ) {
-                        // Top section: Gauge + Pie chart side by side
+                        // Top section: Gauge (1) on left + GridMix (1.6) on right, side by side
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 8.dp),
-                            horizontalArrangement = Arrangement.SpaceEvenly,
-                            verticalAlignment = Alignment.Top
+                                .weight(1f)
                         ) {
-                            PriceGauge(
-                                currentPrice = uiState.currentAgilePrice,
-                                referencePrice = uiState.flexiblePrice,
-                                modifier = Modifier.weight(1f)
-                            )
-
-                            uiState.greenEnergyData?.let { data ->
-                                FuelMixPieChart(
-                                    fuelMix = data.fuelMix,
-                                    lowCarbonPercentage = data.lowCarbonPercentage,
-                                    modifier = Modifier.weight(1f)
-                                )
-                            } ?: run {
-                                // Placeholder while loading
-                                Column(
+                            Card(
+                                colors = cardColors,
+                                shape = cardShape,
+                                modifier = Modifier
+                                    .fillMaxHeight()
+                                    .weight(1f)
+                            ) {
+                                PriceGauge(
+                                    currentPrice = uiState.currentAgilePrice,
+                                    referencePrice = uiState.flexiblePrice,
                                     modifier = Modifier
-                                        .weight(1f)
-                                        .padding(8.dp),
-                                    horizontalAlignment = Alignment.CenterHorizontally
-                                ) {
-                                    Text(
-                                        text = "Grid Mix",
-                                        style = MaterialTheme.typography.labelMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        .fillMaxSize()
+                                        .padding(12.dp)
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.width(16.dp))
+
+                            Card(
+                                colors = cardColors,
+                                shape = cardShape,
+                                modifier = Modifier
+                                    .fillMaxHeight()
+                                    .weight(1.6f)
+                            ) {
+                                uiState.greenEnergyData?.let { data ->
+                                    FuelMixPieChart(
+                                        fuelMix = data.fuelMix,
+                                        lowCarbonPercentage = data.lowCarbonPercentage,
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .padding(12.dp)
                                     )
-                                    Spacer(modifier = Modifier.height(48.dp))
-                                    Text(
-                                        text = "Loading...",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
+                                } ?: run {
+                                    // Placeholder while loading
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .padding(16.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.Center
+                                    ) {
+                                        Text(
+                                            text = "Grid Mix",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        Spacer(modifier = Modifier.height(48.dp))
+                                        Text(
+                                            text = "Loading...",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
                                 }
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(20.dp))
+                        Spacer(modifier = Modifier.height(16.dp))
 
-                        // Bottom section: Price timeline
-                        PriceTimelineChart(
-                            prices = uiState.priceTimeline,
-                            currentPriceStartTime = uiState.currentPriceStartTime,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-
-                        Spacer(modifier = Modifier.height(8.dp))
+                        // Bottom section: Price timeline (bar graph), 1.6x the top section height
+                        Card(
+                            colors = cardColors,
+                            shape = cardShape,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1.6f)
+                        ) {
+                            PriceTimelineChart(
+                                prices = uiState.priceTimeline,
+                                currentPriceStartTime = uiState.currentPriceStartTime,
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(16.dp)
+                            )
+                        }
                     }
                 }
             }

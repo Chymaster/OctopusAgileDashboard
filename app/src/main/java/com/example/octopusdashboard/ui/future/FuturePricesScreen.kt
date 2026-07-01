@@ -89,7 +89,7 @@ fun FuturePricesScreen(
         0
     }
 
-    LaunchedEffect(groupedPrices) {
+    LaunchedEffect(Unit) {
         if (todayIndex > 0) {
             listState.animateScrollToItem(todayIndex)
         }

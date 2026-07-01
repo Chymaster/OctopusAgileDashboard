@@ -1,26 +1,34 @@
 package com.example.octopusdashboard.ui.home.components
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.Fill
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -65,8 +73,9 @@ fun PriceGauge(
     ).filter { it.first > minPrice }
 
     Column(
-        modifier = modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
     ) {
         Text(
             text = "Agile Price",
@@ -78,6 +87,7 @@ fun PriceGauge(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
+                .weight(1f, fill = false)
                 .aspectRatio(1.2f),
             contentAlignment = Alignment.BottomCenter
         ) {
@@ -120,14 +130,20 @@ fun PriceGauge(
                 val cx = size.width / 2f
                 val cy = size.height / 2f
                 val arcRadius = (size.width - strokeWidth * 2) / 2f
-                val arcRadiusY = (size.height - strokeWidth * 2) / 2f
 
-                // Clock-like tick marks around the arc
-                val majorTickInterval = 15
-                val totalTicks = 36
+                // Tick marks: ~16 total, major every 4th
+                val totalTicks = 16
+                val majorTickInterval = 4
                 val outerTickR = arcRadius + strokeWidth / 2 + 2.dp.toPx()
                 val majorTickLength = 8.dp.toPx()
                 val minorTickLength = 4.dp.toPx()
+
+                val labelPaint = android.graphics.Paint().apply {
+                    color = labelColor.toArgb()
+                    textSize = 9.sp.toPx()
+                    textAlign = android.graphics.Paint.Align.CENTER
+                    isAntiAlias = true
+                }
 
                 for (i in 0..totalTicks) {
                     val angle = startAngle + (totalSweep * i / totalTicks)
@@ -149,87 +165,52 @@ fun PriceGauge(
                         strokeWidth = tickWidth,
                         cap = StrokeCap.Round
                     )
-                }
 
-                // Helper to draw a pressure-gauge style tapered hand
-                fun drawPressureHand(
-                    angle: Double,
-                    length: Float,
-                    baseWidth: Float,
-                    color: androidx.compose.ui.graphics.Color
-                ) {
-                    val rad = Math.toRadians(angle)
-                    val tipX = cx + length * cos(rad).toFloat()
-                    val tipY = cy + length * sin(rad).toFloat()
-                    // Perpendicular direction for the base width
-                    val perpX = -sin(rad).toFloat()
-                    val perpY = cos(rad).toFloat()
-                    // Tail extends slightly behind center
-                    val tailLen = length * 0.15f
-                    val tailX = cx - tailLen * cos(rad).toFloat()
-                    val tailY = cy - tailLen * sin(rad).toFloat()
-
-                    val path = Path().apply {
-                        moveTo(tipX, tipY) // tip (pointed)
-                        lineTo(cx + perpX * baseWidth / 2, cy + perpY * baseWidth / 2) // base right
-                        lineTo(tailX + perpX * baseWidth / 3, tailY + perpY * baseWidth / 3) // tail right
-                        lineTo(tailX - perpX * baseWidth / 3, tailY - perpY * baseWidth / 3) // tail left
-                        lineTo(cx - perpX * baseWidth / 2, cy - perpY * baseWidth / 2) // base left
-                        close()
+                    // Price labels at major tick positions
+                    if (isMajor) {
+                        val priceVal = minPrice + range * i / totalTicks
+                        val labelR = outerTickR + 12.dp.toPx()
+                        drawContext.canvas.nativeCanvas.drawText(
+                            String.format(java.util.Locale.UK, "%.0f", priceVal),
+                            cx + labelR * cos(rad).toFloat(),
+                            cy + labelR * sin(rad).toFloat() + 3.dp.toPx(),
+                            labelPaint
+                        )
                     }
-                    drawPath(path, color, style = Fill)
                 }
 
-                // Draw reference hand (flexible/standard tariff — subordinate)
+                // Reference price: filled circle marker on the arc
                 if (referencePrice != null) {
                     val refAngle = priceToAngle(referencePrice)
                     val refRad = Math.toRadians(refAngle.toDouble())
-
-                    // Reference tick on arc
-                    val markerLength = 12.dp.toPx()
-                    val innerR = arcRadius - strokeWidth / 2 - markerLength
-                    val outerR = arcRadius - strokeWidth / 2 + 4.dp.toPx()
-                    drawLine(
+                    drawCircle(
                         color = referenceColor,
-                        start = Offset(cx + innerR * cos(refRad).toFloat(), cy + innerR * sin(refRad).toFloat()),
-                        end = Offset(cx + outerR * cos(refRad).toFloat(), cy + outerR * sin(refRad).toFloat()),
-                        strokeWidth = 3.dp.toPx(),
-                        cap = StrokeCap.Round
-                    )
-
-                    // "Std Tariff" label on arc - use elliptical radii for correct positioning
-                    val labelOffset = 6.dp.toPx()
-                    val flexPaint = android.graphics.Paint().apply {
-                        this.color = referenceColor.hashCode()
-                        textSize = 8.5f.sp.toPx()
-                        textAlign = android.graphics.Paint.Align.CENTER
-                        isAntiAlias = true
-                    }
-                    drawContext.canvas.nativeCanvas.drawText(
-                        "Std Tariff",
-                        cx + (arcRadius + labelOffset) * cos(refRad).toFloat(),
-                        cy + (arcRadiusY + labelOffset) * sin(refRad).toFloat() + 4.dp.toPx(),
-                        flexPaint
-                    )
-
-                    // Pressure-style hand (thinner, shorter)
-                    drawPressureHand(
-                        angle = refAngle.toDouble(),
-                        length = arcRadius - strokeWidth / 2 - 16.dp.toPx(),
-                        baseWidth = 4.dp.toPx(),
-                        color = referenceColor
+                        radius = 5.dp.toPx(),
+                        center = Offset(
+                            cx + arcRadius * cos(refRad).toFloat(),
+                            cy + arcRadius * sin(refRad).toFloat()
+                        )
                     )
                 }
 
-                // Draw agile needle (prominent, on top)
+                // Current price: tapered triangle needle
                 if (currentPrice != null) {
                     val needleAngle = priceToAngle(currentPrice)
-                    drawPressureHand(
-                        angle = needleAngle.toDouble(),
-                        length = arcRadius - strokeWidth / 2 - 8.dp.toPx(),
-                        baseWidth = 6.dp.toPx(),
-                        color = needleColor
-                    )
+                    val rad = Math.toRadians(needleAngle.toDouble())
+                    val needleLength = arcRadius - strokeWidth / 2 - 8.dp.toPx()
+                    val tipX = cx + needleLength * cos(rad).toFloat()
+                    val tipY = cy + needleLength * sin(rad).toFloat()
+                    val perpX = -sin(rad).toFloat()
+                    val perpY = cos(rad).toFloat()
+                    val baseHalfWidth = 5.dp.toPx()
+
+                    val path = Path().apply {
+                        moveTo(tipX, tipY)
+                        lineTo(cx + perpX * baseHalfWidth, cy + perpY * baseHalfWidth)
+                        lineTo(cx - perpX * baseHalfWidth, cy - perpY * baseHalfWidth)
+                        close()
+                    }
+                    drawPath(path, needleColor, style = Fill)
 
                     // Pivot circle
                     drawCircle(color = needleColor, radius = 6.dp.toPx(), center = Offset(cx, cy))
@@ -238,7 +219,7 @@ fun PriceGauge(
             }
         }
 
-        // Text below the gauge
+        // Text below the gauge — price is the focal point
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier.padding(top = 4.dp)
@@ -248,7 +229,7 @@ fun PriceGauge(
                     text = String.format(java.util.Locale.UK, "%.1f", currentPrice),
                     style = MaterialTheme.typography.headlineMedium,
                     fontWeight = FontWeight.Bold,
-                    color = PriceColors.priceColor(currentPrice),
+                    color = MaterialTheme.colorScheme.onSurface,
                     textAlign = TextAlign.Center
                 )
                 Text(
@@ -267,12 +248,25 @@ fun PriceGauge(
             }
             if (referencePrice != null) {
                 Spacer(modifier = Modifier.height(2.dp))
-                Text(
-                    text = String.format(java.util.Locale.UK, "Std Tariff: %.1f p/kWh", referencePrice),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = referenceColor,
-                    textAlign = TextAlign.Center
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .clip(CircleShape)
+                            .background(referenceColor)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = String.format(java.util.Locale.UK, "%.1f p/kWh", referencePrice),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.tertiary,
+                        textAlign = TextAlign.Center
+                    )
+                }
             }
         }
     }
