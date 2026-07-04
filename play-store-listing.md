@@ -6,7 +6,7 @@ Octopus Dashboard
 
 ## Short description (max 80 characters)
 
-Privacy-first Octopus Agile tracker. No ads, no accounts, fully open source.
+Agile price tracker. Your data never leave your device. Fully open source.
 
 ## Full description
 
@@ -14,8 +14,8 @@ Privacy-first Octopus Agile tracker. No ads, no accounts, fully open source.
 
 Octopus Dashboard is a beautiful, open-source companion for Octopus Energy Agile customers. See half-hourly electricity prices, analyse your usage, and find the cheapest slots — all without giving up your privacy.
 
-**🔒 Your Data Stays on Your Device**
-No accounts. No sign-ups. No data collection. Everything — your API key, meter details, usage history, and preferences — is stored locally on your phone and sent only to Octopus Energy's own servers to fetch your data. Nothing is sent to us or any third party, because there is no "us" — just you and your electricity meter.
+**🔒 Your Data Never Leave Your Device**
+No accounts. No sign-ups. No data collection. Everything — your API key, meter details, usage history, and preferences — is stored locally on your phone and never sent anywhere except directly to Octopus Energy's own API to fetch your tariff data. There are no remote servers, no cloud sync, and no third-party services. Your data never leave your device.
 
 **🚫 No Ads, No Tracking, Ever**
 This app is completely free with zero ads, zero analytics SDKs, and zero tracking. There are no in-app purchases, no premium tier, and no hidden costs. Your attention is not the product.
