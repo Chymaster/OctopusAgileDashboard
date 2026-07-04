@@ -1,5 +1,7 @@
 package com.chymaster.octopusagiledashboard.ui.nav
 
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.DrawerValue
@@ -9,6 +11,7 @@ import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.navigation.NavHostController
@@ -37,7 +40,7 @@ fun AppNavGraph(
 
     ModalNavigationDrawer(
         drawerState = drawerState,
-        gesturesEnabled = true,
+        gesturesEnabled = false,
         drawerContent = {
             DrawerContent(
                 currentRoute = currentRoute,
@@ -52,7 +55,17 @@ fun AppNavGraph(
             )
         }
     ) {
-        Box(modifier = Modifier.fillMaxSize()) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .clickable(
+                    enabled = drawerState.isOpen,
+                    indication = null,
+                    interactionSource = remember { MutableInteractionSource() }
+                ) {
+                    scope.launch { drawerState.close() }
+                }
+        ) {
             NavHost(navController = navController, startDestination = Routes.HOME) {
                 composable(Routes.HOME) {
                     HomeScreen(

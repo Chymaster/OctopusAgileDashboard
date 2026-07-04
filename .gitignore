@@ -11,3 +11,9 @@ local.properties
 *.txt
 screenshot_*.png
 .claude/
+
+# Signing keystore
+*.jks
+
+# Release builds
+/releases/

@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Privacy Policy — OctopusDashboard</title>
+    <style>
+        :root {
+            --color-bg: #ffffff;
+            --color-text: #1a1a2e;
+            --color-muted: #555;
+            --color-accent: #2563eb;
+            --color-border: #e5e7eb;
+            --color-card-bg: #f9fafb;
+        }
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --color-bg: #0f172a;
+                --color-text: #e2e8f0;
+                --color-muted: #94a3b8;
+                --color-accent: #60a5fa;
+                --color-border: #334155;
+                --color-card-bg: #1e293b;
+            }
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background: var(--color-bg);
+            color: var(--color-text);
+            line-height: 1.7;
+            padding: 2rem 1rem;
+        }
+        .container {
+            max-width: 720px;
+            margin: 0 auto;
+        }
+        h1 {
+            font-size: 2rem;
+            font-weight: 700;
+            margin-bottom: 0.25rem;
+        }
+        .app-name {
+            font-size: 1rem;
+            color: var(--color-muted);
+            font-weight: 500;
+            margin-bottom: 0.5rem;
+        }
+        .last-updated {
+            font-size: 0.875rem;
+            color: var(--color-muted);
+            margin-bottom: 2.5rem;
+            padding-bottom: 1.5rem;
+            border-bottom: 1px solid var(--color-border);
+        }
+        h2 {
+            font-size: 1.35rem;
+            font-weight: 600;
+            margin: 2.5rem 0 1rem;
+            color: var(--color-text);
+        }
+        h3 {
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin: 1.5rem 0 0.75rem;
+            color: var(--color-text);
+        }
+        p, li {
+            margin-bottom: 0.75rem;
+            color: var(--color-text);
+        }
+        ul, ol {
+            padding-left: 1.5rem;
+            margin-bottom: 1rem;
+        }
+        strong {
+            font-weight: 600;
+        }
+        a {
+            color: var(--color-accent);
+            text-decoration: none;
+        }
+        a:hover {
+            text-decoration: underline;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 1rem 0;
+            font-size: 0.95rem;
+        }
+        th, td {
+            text-align: left;
+            padding: 0.6rem 0.8rem;
+            border: 1px solid var(--color-border);
+        }
+        th {
+            background: var(--color-card-bg);
+            font-weight: 600;
+        }
+        code {
+            font-family: "SF Mono", SFMono-Regular, ui-monospace, "Cascadia Code", Menlo, monospace;
+            font-size: 0.875em;
+            background: var(--color-card-bg);
+            padding: 0.15em 0.4em;
+            border-radius: 4px;
+        }
+        hr {
+            border: none;
+            border-top: 1px solid var(--color-border);
+            margin: 2.5rem 0 1.5rem;
+        }
+        .footer {
+            font-size: 0.85rem;
+            color: var(--color-muted);
+            font-style: italic;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Privacy Policy</h1>
+        <p class="app-name">OctopusDashboard</p>
+        <p class="last-updated">Last updated: 4 July 2026</p>
+
+        <h2>Introduction</h2>
+        <p>OctopusDashboard ("the App") is an Android application that displays electricity pricing and consumption data from your Octopus Energy account. This privacy policy explains what data the App accesses, how it is used, and how it is protected.</p>
+
+        <h2>Data We Collect</h2>
+
+        <h3>Data You Provide</h3>
+        <p>The App requires you to manually enter the following information in the Settings screen:</p>
+        <ul>
+            <li><strong>Octopus Energy API key</strong> — used to authenticate requests to the Octopus Energy API</li>
+            <li><strong>MPAN (Meter Point Administration Number)</strong> — your electricity supply point identifier</li>
+            <li><strong>Meter serial number</strong> — your meter's unique serial number</li>
+            <li><strong>Grid Supply Point (GSP)</strong> — your electricity distribution region code</li>
+            <li><strong>Product code</strong> — your Octopus Energy tariff product code</li>
+        </ul>
+        <p>All of this data is entered voluntarily by you. The App does not request, collect, or transmit any of this data automatically.</p>
+
+        <h3>Data Retrieved From External Services</h3>
+        <p>The App retrieves the following data from third-party APIs:</p>
+        <ul>
+            <li><strong>Electricity pricing data</strong> — half-hourly unit rates and standing charges from the Octopus Energy API (<code>api.energy.octopus.energy</code>)</li>
+            <li><strong>Energy consumption data</strong> — your historical half-hourly electricity consumption from the Octopus Energy API</li>
+            <li><strong>Meter point information</strong> — tariff and meter details from the Octopus Energy API</li>
+            <li><strong>Fuel mix data</strong> — current electricity generation source breakdown from the Carbon Intensity API (<code>api.carbonintensity.org.uk</code>), a public UK government service</li>
+        </ul>
+
+        <h3>Data Stored Locally on Your Device</h3>
+        <p>The App stores the following data locally on your device using Android DataStore and Room database:</p>
+        <ul>
+            <li>Your API key, MPAN, meter serial number, GSP, and product code (DataStore preferences)</li>
+            <li>Cached electricity pricing data (Room database)</li>
+            <li>Cached consumption history (Room database)</li>
+            <li>Cached standing charge information (Room database)</li>
+            <li>App settings and display preferences (DataStore preferences)</li>
+        </ul>
+        <p>No data is stored on any external servers. All data remains on your device.</p>
+
+        <h3>Data We Do NOT Collect</h3>
+        <p>The App does <strong>not</strong> collect:</p>
+        <ul>
+            <li>Your name, email address, or any personal identifiers</li>
+            <li>Your location or GPS coordinates</li>
+            <li>Your device identifiers or advertising IDs</li>
+            <li>Usage analytics or crash reports</li>
+            <li>Any data from other apps on your device</li>
+            <li>Contacts, photos, files, or any other personal content</li>
+        </ul>
+
+        <h2>How Your Data Is Used</h2>
+        <p>Your data is used solely to:</p>
+        <ol>
+            <li><strong>Authenticate with Octopus Energy</strong> — your API key is sent with HTTP requests to the Octopus Energy API to retrieve your account-specific data</li>
+            <li><strong>Display pricing information</strong> — tariff and pricing data is shown in charts and gauges</li>
+            <li><strong>Display consumption history</strong> — your electricity usage is shown in cost analysis views</li>
+            <li><strong>Display fuel mix</strong> — the current UK generation mix is shown as a pie chart</li>
+        </ol>
+        <p>The App does not use your data for advertising, profiling, analytics, or any purpose other than displaying your energy information to you.</p>
+
+        <h2>Data Sharing</h2>
+        <p>The App does <strong>not</strong> share your data with any third parties. Specifically:</p>
+        <ul>
+            <li><strong>No analytics services</strong> — the App does not integrate Google Analytics, Firebase, or any other analytics SDK</li>
+            <li><strong>No advertising networks</strong> — the App contains no advertising</li>
+            <li><strong>No data brokers</strong> — no data is sold, rented, or transferred to any third party</li>
+            <li><strong>No social media integrations</strong> — the App does not connect to any social networks</li>
+        </ul>
+        <p>The only external services the App communicates with are:</p>
+        <ol>
+            <li><strong>Octopus Energy API</strong> (<code>api.energy.octopus.energy</code>) — to retrieve your energy data. Your API key is transmitted as an HTTP Basic Authentication header. This is necessary for the App to function. See Octopus Energy's privacy policy for how they handle data.</li>
+            <li><strong>Carbon Intensity API</strong> (<code>api.carbonintensity.org.uk</code>) — a public UK government API that provides no user-identifiable data. No credentials or personal information are sent to this service.</li>
+        </ol>
+
+        <h2>Data Security</h2>
+        <ul>
+            <li><strong>Encryption in transit</strong> — all network requests to the Octopus Energy API use HTTPS (TLS), encrypting your API key and data during transmission</li>
+            <li><strong>Local storage</strong> — data stored on your device is protected by Android's standard application sandboxing. The API key and credentials are stored in Android DataStore, which is accessible only to the App</li>
+            <li><strong>No cloud storage</strong> — the App does not upload any data to cloud services</li>
+        </ul>
+
+        <h2>Data Retention and Deletion</h2>
+        <ul>
+            <li><strong>Locally stored data persists</strong> until you uninstall the App or clear its data through Android Settings</li>
+            <li><strong>To delete all stored data</strong>: go to Android Settings → Apps → OctopusDashboard → Storage → Clear Data, or uninstall the App</li>
+            <li><strong>Cached API data</strong> (prices, consumption, standing charges) is retained locally to reduce network requests and enable offline viewing. Old cached data may be automatically purged when new data is fetched</li>
+        </ul>
+
+        <h2>Permissions</h2>
+        <p>The App requests the following Android permissions:</p>
+        <table>
+            <thead>
+                <tr>
+                    <th>Permission</th>
+                    <th>Purpose</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><code>INTERNET</code></td>
+                    <td>Required to make API requests to Octopus Energy and Carbon Intensity APIs</td>
+                </tr>
+                <tr>
+                    <td><code>ACCESS_NETWORK_STATE</code></td>
+                    <td>Required to check network connectivity before making API requests</td>
+                </tr>
+            </tbody>
+        </table>
+        <p>The App does <strong>not</strong> request access to location, camera, microphone, contacts, storage, phone, or any other sensitive permissions.</p>
+
+        <h2>Children's Privacy</h2>
+        <p>The App is not directed at children under the age of 13 and does not knowingly collect personal information from children.</p>
+
+        <h2>Changes to This Policy</h2>
+        <p>We may update this privacy policy from time to time. Changes will be reflected by updating the "Last updated" date at the top of this policy. Continued use of the App after changes constitutes acceptance of the updated policy.</p>
+
+        <h2>Contact</h2>
+        <p>If you have questions about this privacy policy or the App's data practices, please contact:</p>
+        <ul>
+            <li><strong>Developer</strong>: Chymaster</li>
+            <li><strong>Email</strong>: <a href="mailto:contact@chymaster.com">contact@chymaster.com</a></li>
+        </ul>
+
+        <hr>
+        <p class="footer">This privacy policy is provided in compliance with <a href="https://support.google.com/googleplay/android-developer/answer/10144311">Google Play Store developer policies</a>.</p>
+    </div>
+</body>
+</html>
