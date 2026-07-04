@@ -37,7 +37,7 @@ fun AppNavGraph(
 
     ModalNavigationDrawer(
         drawerState = drawerState,
-s        gesturesEnabled = true,
+        gesturesEnabled = true,
         drawerContent = {
             DrawerContent(
                 currentRoute = currentRoute,
