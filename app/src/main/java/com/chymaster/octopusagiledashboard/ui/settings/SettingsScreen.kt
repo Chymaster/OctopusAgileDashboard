@@ -112,6 +112,12 @@ fun SettingsScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
+            Text(
+                text = "Your credentials will never leave your phone other than to authenticate with Octopus Energy, and your data will never leave your phone.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
             // API Key
             OutlinedTextField(
                 value = uiState.apiKey,
