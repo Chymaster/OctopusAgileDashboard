@@ -6,7 +6,7 @@ Octopus Dashboard
 
 ## Short description (max 80 characters)
 
-Agile price tracker. Your data never leave your device. Fully open source.
+Privacy-first Octopus Agile tracker. Your data never leave your device.
 
 ## Full description
 
