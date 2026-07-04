@@ -19,6 +19,7 @@ import com.chymaster.octopusagiledashboard.data.prefs.UserPreferencesRepository
 import com.chymaster.octopusagiledashboard.ui.dashboard.DashboardScreen
 import com.chymaster.octopusagiledashboard.ui.future.FuturePricesScreen
 import com.chymaster.octopusagiledashboard.ui.home.HomeScreen
+import com.chymaster.octopusagiledashboard.ui.settings.AdvancedSettingsScreen
 import com.chymaster.octopusagiledashboard.ui.settings.SettingsScreen
 import kotlinx.coroutines.launch
 
@@ -36,7 +37,7 @@ fun AppNavGraph(
 
     ModalNavigationDrawer(
         drawerState = drawerState,
-        gesturesEnabled = false,
+s        gesturesEnabled = true,
         drawerContent = {
             DrawerContent(
                 currentRoute = currentRoute,
@@ -74,7 +75,13 @@ fun AppNavGraph(
                 composable(Routes.SETTINGS) {
                     SettingsScreen(
                         onNavigateBack = { navController.popBackStack() },
-                        showBackButton = true
+                        showBackButton = true,
+                        onNavigateToAdvancedSettings = { navController.navigate(Routes.ADVANCED_SETTINGS) }
+                    )
+                }
+                composable(Routes.ADVANCED_SETTINGS) {
+                    AdvancedSettingsScreen(
+                        onBack = { navController.popBackStack() }
                     )
                 }
             }

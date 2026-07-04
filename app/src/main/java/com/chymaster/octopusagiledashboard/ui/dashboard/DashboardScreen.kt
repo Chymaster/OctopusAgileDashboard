@@ -46,13 +46,16 @@ import com.chymaster.octopusagiledashboard.domain.model.CustomDateRange
 import com.chymaster.octopusagiledashboard.domain.model.DateRangeSelection
 import com.chymaster.octopusagiledashboard.ui.chart.ChartMode
 import com.chymaster.octopusagiledashboard.ui.chart.PriceLineChart
+import com.chymaster.octopusagiledashboard.ui.chart.PriceUsageChart
 import com.chymaster.octopusagiledashboard.ui.components.CustomDatePickerDialog
 import com.chymaster.octopusagiledashboard.ui.components.ErrorState
 import com.chymaster.octopusagiledashboard.ui.components.LoadingState
 import com.chymaster.octopusagiledashboard.ui.components.PriceRangeCards
 import com.chymaster.octopusagiledashboard.ui.components.RangeSelector
 import com.chymaster.octopusagiledashboard.ui.components.SummaryCards
+import com.chymaster.octopusagiledashboard.ui.detail.CostBreakdownSheet
 import com.chymaster.octopusagiledashboard.ui.detail.DataPointDetailSheet
+import com.chymaster.octopusagiledashboard.ui.detail.UsageZoneBreakdownSheet
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -66,7 +69,7 @@ fun DashboardScreen(
     val uiState by viewModel.uiState.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
     var showDatePicker by remember { mutableStateOf(false) }
-    var chartMode by remember { mutableStateOf(ChartMode.COST) }
+    var chartGroup by remember { mutableStateOf(ChartGroup.PRICE_USAGE) }
 
     LaunchedEffect(uiState.error) {
         uiState.error?.let {
@@ -94,8 +97,8 @@ fun DashboardScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = onOpenFuturePrices) {
-                        Icon(Icons.Default.CalendarMonth, contentDescription = "Future Prices")
+                    IconButton(onClick = { showDatePicker = true }) {
+                        Icon(Icons.Default.CalendarMonth, contentDescription = "Select custom date range")
                     }
                     IconButton(onClick = { viewModel.onRefresh() }) {
                         Icon(Icons.Default.Refresh, contentDescription = "Refresh")
@@ -184,7 +187,9 @@ fun DashboardScreen(
                                         totalKwh = uiState.totalKwh,
                                         avgPrice = uiState.avgPrice,
                                         minPrice = uiState.minPrice,
-                                        maxPrice = uiState.maxPrice
+                                        maxPrice = uiState.maxPrice,
+                                        onTotalCostClick = { viewModel.onToggleCostBreakdown() },
+                                        onUsageClick = { viewModel.onToggleUsageBreakdown() }
                                     )
 
                                     Spacer(modifier = Modifier.height(8.dp))
@@ -200,28 +205,50 @@ fun DashboardScreen(
                                 )
                             }
 
+                            // Cost breakdown rendered as a separate row so it has
+                            // its own height and doesn't get clipped by the parent Box.
+                            if (uiState.showCostBreakdown) {
+                                CostBreakdownSheet(
+                                    visible = true,
+                                    usageCost = uiState.usageCost,
+                                    standingChargeCost = uiState.standingChargeCost,
+                                    totalCost = uiState.totalCost,
+                                    onDismiss = { viewModel.onToggleCostBreakdown() }
+                                )
+                            }
+
+                            // Usage zone breakdown
+                            if (uiState.showUsageBreakdown) {
+                                UsageZoneBreakdownSheet(
+                                    visible = true,
+                                    greenKwh = uiState.greenUsageKwh,
+                                    amberKwh = uiState.amberUsageKwh,
+                                    redKwh = uiState.redUsageKwh,
+                                    onDismiss = { viewModel.onToggleUsageBreakdown() }
+                                )
+                            }
+
                             Spacer(modifier = Modifier.height(12.dp))
 
-                            // Chart mode selector
+                            // Chart group selector
                             SingleChoiceSegmentedButtonRow(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(horizontal = 16.dp)
                             ) {
-                                ChartMode.entries.forEachIndexed { index, mode ->
+                                ChartGroup.entries.forEachIndexed { index, group ->
                                     SegmentedButton(
                                         shape = SegmentedButtonDefaults.itemShape(
                                             index = index,
-                                            count = ChartMode.entries.size
+                                            count = ChartGroup.entries.size
                                         ),
-                                        onClick = { chartMode = mode },
-                                        selected = chartMode == mode
+                                        onClick = { chartGroup = group },
+                                        selected = chartGroup == group
                                     ) {
                                         Text(
-                                            when (mode) {
-                                                ChartMode.PRICE -> "Price"
-                                                ChartMode.CONSUMPTION -> "Usage"
-                                                ChartMode.COST -> "Cost"
+                                            when (group) {
+                                                ChartGroup.PRICE_USAGE -> "Price & Usage"
+                                                ChartGroup.COST -> "Cost"
                                             }
                                         )
                                     }
@@ -230,14 +257,24 @@ fun DashboardScreen(
 
                             Spacer(modifier = Modifier.height(8.dp))
 
-                            // Chart
-                            if (uiState.points.isNotEmpty()) {
-                                PriceLineChart(
-                                    points = uiState.points,
-                                    chartMode = chartMode,
-                                    onPointTapped = viewModel::onPointTapped,
-                                    modifier = Modifier.padding(horizontal = 8.dp)
-                                )
+                            // Chart — always render with displayChartPoints so
+                            // the selected time range is visible even before
+                            // the Octopus usage API returns data.
+                            if (uiState.displayChartPoints.isNotEmpty()) {
+                                when (chartGroup) {
+                                    ChartGroup.PRICE_USAGE -> PriceUsageChart(
+                                        points = uiState.displayChartPoints,
+                                        referencePrice = uiState.flexiblePrice,
+                                        onPointTapped = viewModel::onPointTapped,
+                                        modifier = Modifier.padding(horizontal = 8.dp)
+                                    )
+                                    ChartGroup.COST -> PriceLineChart(
+                                        points = uiState.chartPoints,
+                                        chartMode = ChartMode.COST,
+                                        onPointTapped = viewModel::onPointTapped,
+                                        modifier = Modifier.padding(horizontal = 8.dp)
+                                    )
+                                }
                             }
                         }
                     }
@@ -246,3 +283,10 @@ fun DashboardScreen(
         }
     }
 }
+
+/**
+ * Top-level chart selection on the Dashboard. The "Price & Usage" view shows
+ * a dual-axis chart (price bars on the left axis, usage line on the right).
+ * The "Cost" view shows the existing single-series cost column chart.
+ */
+private enum class ChartGroup { PRICE_USAGE, COST }

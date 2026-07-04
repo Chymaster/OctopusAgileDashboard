@@ -162,7 +162,9 @@ fun FuturePricesScreen(
                             ) { price ->
                                 PriceRow(
                                     price = price,
-                                    flexiblePrice = uiState.flexiblePrice
+                                    flexiblePrice = uiState.flexiblePrice,
+                                    cheapPercent = uiState.cheapThresholdPercent,
+                                    moderatePercent = uiState.moderateThresholdPercent
                                 )
                             }
                         }
@@ -208,9 +210,14 @@ private fun DateSectionHeader(
 }
 
 @Composable
-private fun PriceRow(price: AgilePrice, flexiblePrice: Double? = null) {
+private fun PriceRow(
+    price: AgilePrice,
+    flexiblePrice: Double? = null,
+    cheapPercent: Int = PriceColors.DEFAULT_CHEAP_PERCENT,
+    moderatePercent: Int = PriceColors.DEFAULT_MODERATE_PERCENT
+) {
     val zoned = price.validFrom.atZone(londonZone)
-    val color = PriceColors.priceColor(price.priceIncVat, flexiblePrice)
+    val color = PriceColors.priceColor(price.priceIncVat, flexiblePrice, cheapPercent, moderatePercent)
     val now = Instant.now()
     val isPast = price.validTo < now
     val isCurrent = price.validFrom <= now && price.validTo > now

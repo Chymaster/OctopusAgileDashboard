@@ -5,6 +5,7 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.doublePreferencesKey
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -23,7 +24,8 @@ private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(
 
 @Singleton
 class UserPreferencesRepository @Inject constructor(
-    @param:ApplicationContext private val context: Context
+    @param:ApplicationContext private val context: Context,
+    private val secureApiKeyStore: SecureApiKeyStore
 ) {
 
     private val dataStore = context.dataStore
@@ -39,9 +41,30 @@ class UserPreferencesRepository @Inject constructor(
         val LAST_CONSUMPTION_REFRESH = longPreferencesKey("last_consumption_refresh")
         val CACHED_FLEXIBLE_PRICE = doublePreferencesKey("cached_flexible_price")
         val CACHED_FLEXIBLE_PRICE_TIMESTAMP = longPreferencesKey("cached_flexible_price_timestamp")
+        val CHEAP_THRESHOLD_PERCENT = intPreferencesKey("cheap_threshold_percent")
+        val MODERATE_THRESHOLD_PERCENT = intPreferencesKey("moderate_threshold_percent")
     }
 
-    val apiKeyFlow: Flow<String?> = dataStore.data.map { it[API_KEY] }
+    /**
+     * Reads the API key from encrypted storage. One-time migration: if the key
+     * exists in plain DataStore but not yet in EncryptedSharedPreferences, it
+     * is moved on first access and removed from DataStore.
+     */
+    val apiKeyFlow: Flow<String?> = dataStore.data.map { prefs ->
+        val encrypted = secureApiKeyStore.getApiKey()
+        if (encrypted != null) {
+            encrypted
+        } else {
+            // Migrate from plain DataStore if present
+            val legacy = prefs[API_KEY]
+            if (!legacy.isNullOrBlank()) {
+                secureApiKeyStore.saveApiKey(legacy)
+                legacy
+            } else {
+                null
+            }
+        }
+    }
     val mpanFlow: Flow<String?> = dataStore.data.map { it[MPAN] }
     val serialNumberFlow: Flow<String?> = dataStore.data.map { it[SERIAL_NUMBER] }
     val gspFlow: Flow<String?> = dataStore.data.map { it[GSP] }
@@ -63,7 +86,9 @@ class UserPreferencesRepository @Inject constructor(
     }
 
     suspend fun saveApiKey(apiKey: String) {
-        dataStore.edit { it[API_KEY] = apiKey }
+        secureApiKeyStore.saveApiKey(apiKey)
+        // Remove from plain DataStore if it was there (migration cleanup)
+        dataStore.edit { it.remove(API_KEY) }
     }
 
     suspend fun saveMpan(mpan: String) {
@@ -110,9 +135,24 @@ class UserPreferencesRepository @Inject constructor(
         }
     }
 
+    /** Cheap/green threshold as a percentage of the flexible price (default 70%). */
+    val cheapThresholdPercentFlow: Flow<Int> = dataStore.data.map { it[CHEAP_THRESHOLD_PERCENT] ?: 70 }
+
+    /** Moderate/amber threshold as a percentage of the flexible price (default 120%). */
+    val moderateThresholdPercentFlow: Flow<Int> = dataStore.data.map { it[MODERATE_THRESHOLD_PERCENT] ?: 120 }
+
+    suspend fun saveCheapThresholdPercent(percent: Int) {
+        dataStore.edit { it[CHEAP_THRESHOLD_PERCENT] = percent }
+    }
+
+    suspend fun saveModerateThresholdPercent(percent: Int) {
+        dataStore.edit { it[MODERATE_THRESHOLD_PERCENT] = percent }
+    }
+
     suspend fun saveCredentials(apiKey: String, mpan: String, serialNumber: String, gsp: String, productCode: String) {
+        secureApiKeyStore.saveApiKey(apiKey)
         dataStore.edit { prefs ->
-            prefs[API_KEY] = apiKey
+            prefs.remove(API_KEY) // Keep API key only in encrypted store
             prefs[MPAN] = mpan
             prefs[SERIAL_NUMBER] = serialNumber
             prefs[GSP] = gsp

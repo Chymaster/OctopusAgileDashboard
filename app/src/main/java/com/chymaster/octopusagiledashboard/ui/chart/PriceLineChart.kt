@@ -239,7 +239,7 @@ fun PriceLineChart(
 }
 
 @Composable
-private fun rememberPriceMarker(
+internal fun rememberPriceMarker(
     valueFormatter: DefaultCartesianMarker.ValueFormatter
 ): CartesianMarker? {
     val labelBackgroundShape = MarkerCornerBasedShape(CircleShape)

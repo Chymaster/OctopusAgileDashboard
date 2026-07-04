@@ -26,7 +26,13 @@ data class SettingsUiState(
     val connectionTestState: ConnectionTestState = ConnectionTestState.Idle,
     val saveSuccess: Boolean = false,
     val error: String? = null
-)
+) {
+    override fun toString(): String =
+        "SettingsUiState(apiKey=***, mpan=$mpan, serialNumber=$serialNumber, gsp=$gsp, " +
+            "productCode=$productCode, flexibleProductCode=$flexibleProductCode, " +
+            "tariffCode=$tariffCode, isSaving=$isSaving, connectionTestState=$connectionTestState, " +
+            "saveSuccess=$saveSuccess, error=$error)"
+}
 
 sealed interface ConnectionTestState {
     data object Idle : ConnectionTestState

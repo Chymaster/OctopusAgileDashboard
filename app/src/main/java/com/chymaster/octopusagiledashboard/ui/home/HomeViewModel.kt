@@ -31,7 +31,9 @@ data class HomeUiState(
     val currentPriceStartTime: Instant? = null,
     val priceTimeline: List<AgilePrice> = emptyList(),
     val flexiblePrice: Double? = null,
-    val greenEnergyData: GreenEnergyData? = null
+    val greenEnergyData: GreenEnergyData? = null,
+    val cheapThresholdPercent: Int = 70,
+    val moderateThresholdPercent: Int = 120
 )
 
 @HiltViewModel
@@ -51,6 +53,18 @@ class HomeViewModel @Inject constructor(
     init {
         refreshJob = loadAllData()
         startGreenEnergyRefreshLoop()
+
+        // Observe threshold preferences
+        viewModelScope.launch {
+            preferencesRepository.cheapThresholdPercentFlow.collect { percent ->
+                _uiState.update { it.copy(cheapThresholdPercent = percent) }
+            }
+        }
+        viewModelScope.launch {
+            preferencesRepository.moderateThresholdPercentFlow.collect { percent ->
+                _uiState.update { it.copy(moderateThresholdPercent = percent) }
+            }
+        }
     }
 
     fun onRefresh() {
