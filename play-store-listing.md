@@ -6,13 +6,22 @@ Octopus Dashboard
 
 ## Short description (max 80 characters)
 
-Track Octopus Agile electricity prices, view usage analytics & find the cheapest slots.
+Privacy-first Octopus Agile tracker. No ads, no accounts, fully open source.
 
 ## Full description
 
-🔋 **Take control of your energy costs with Octopus Dashboard**
+🔋 **The privacy-first way to track Octopus Energy Agile prices**
 
-Octopus Dashboard is a smart, visual companion for customers on the Octopus Energy Agile electricity tariff. With half-hourly price updates, beautiful charts, and powerful usage analytics, you'll always know when electricity is cheap — and when it isn't.
+Octopus Dashboard is a beautiful, open-source companion for Octopus Energy Agile customers. See half-hourly electricity prices, analyse your usage, and find the cheapest slots — all without giving up your privacy.
+
+**🔒 Your Data Stays on Your Device**
+No accounts. No sign-ups. No data collection. Everything — your API key, meter details, usage history, and preferences — is stored locally on your phone and sent only to Octopus Energy's own servers to fetch your data. Nothing is sent to us or any third party, because there is no "us" — just you and your electricity meter.
+
+**🚫 No Ads, No Tracking, Ever**
+This app is completely free with zero ads, zero analytics SDKs, and zero tracking. There are no in-app purchases, no premium tier, and no hidden costs. Your attention is not the product.
+
+**💻 Fully Open Source**
+The entire source code is publicly available and open for inspection. You can verify every permission, every network call, and every line of code. If you're a developer, contributions are welcome.
 
 **⚡ Live Price Tracking**
 See the current Agile price at a glance on a colour-coded gauge that compares against the Flexible Octopus reference rate. Green means cheap, amber means moderate, red means expensive — so you can decide in an instant whether to run the dishwasher now or wait.
@@ -36,10 +45,7 @@ Plan ahead with a full price schedule up to 2 days in the future. Prices are gro
 **⚙️ Fully Configurable**
 • Adjust the green/amber and amber/red price thresholds to match your own definition of "cheap"
 • Supports all UK distribution regions
-• Works with or without an Octopus Energy account — prices are free for everyone
-
-**🔒 Private & Secure**
-Your API key, MPAN, and meter data never leave your phone except to authenticate directly with Octopus Energy. No analytics, no tracking, no third parties.
+• Works without entering any credentials — public price data is free for everyone
 
 ## What's new
 
