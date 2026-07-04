@@ -181,14 +181,19 @@ class DashboardViewModel @Inject constructor(
 
     private fun loadData(range: DateRangeSelection): Job {
         return viewModelScope.launch {
+            val (start, end) = getDateRange(range)
             _uiState.update {
                 it.copy(
                     isLoading = it.points.isEmpty(),
                     error = null,
-                    selectedRange = range
+                    selectedRange = range,
+                    // Show placeholder points immediately so the chart renders
+                    // the time range even before data arrives.
+                    displayChartPoints = it.chartPoints.ifEmpty {
+                        generatePlaceholderPoints(start, end)
+                    }
                 )
             }
-            val (start, end) = getDateRange(range)
 
             // Start observing Room cache immediately — shows cached data right away
             launch {

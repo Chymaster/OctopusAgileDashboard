@@ -269,7 +269,7 @@ fun DashboardScreen(
                                         modifier = Modifier.padding(horizontal = 8.dp)
                                     )
                                     ChartGroup.COST -> PriceLineChart(
-                                        points = uiState.chartPoints,
+                                        points = uiState.displayChartPoints,
                                         chartMode = ChartMode.COST,
                                         onPointTapped = viewModel::onPointTapped,
                                         modifier = Modifier.padding(horizontal = 8.dp)
