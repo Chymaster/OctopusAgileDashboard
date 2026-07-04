@@ -31,7 +31,9 @@ fun DrawerContent(
     onCloseDrawer: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    ModalDrawerSheet(modifier = modifier) {
+    ModalDrawerSheet(
+        modifier = modifier.width(280.dp)
+    ) {
         Spacer(modifier = Modifier.height(16.dp))
         Text(
             text = "Octopus Dashboard",
