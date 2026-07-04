@@ -43,6 +43,8 @@ fun PriceTimelineChart(
     prices: List<AgilePrice>,
     currentPriceStartTime: Instant?,
     referencePrice: Double? = null,
+    cheapPercent: Int = PriceColors.DEFAULT_CHEAP_PERCENT,
+    moderatePercent: Int = PriceColors.DEFAULT_MODERATE_PERCENT,
     modifier: Modifier = Modifier
 ) {
     val labelColor = MaterialTheme.colorScheme.onSurfaceVariant
@@ -163,7 +165,7 @@ fun PriceTimelineChart(
 
                         if (barDrawHeight > 0f) {
                             drawRoundRect(
-                                color = PriceColors.priceColor(price, referencePrice),
+                                color = PriceColors.priceColor(price, referencePrice, cheapPercent, moderatePercent),
                                 topLeft = Offset(x, barTop),
                                 size = Size(barWidth, barDrawHeight),
                                 cornerRadius = CornerRadius(2.dp.toPx(), 2.dp.toPx())

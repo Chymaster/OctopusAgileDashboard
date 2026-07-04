@@ -23,6 +23,24 @@ data class BinnedPoint(
 )
 
 /**
+ * Trims leading and trailing [HalfHourPoint] entries that have no consumption
+ * data. The Octopus API frequently returns price data for intervals where
+ * consumption has not yet been recorded (typically the first and last
+ * half-hour slots), which causes the usage line to dip to zero at the edges
+ * of the chart. This function removes those edge gaps while preserving any
+ * interior nulls (which represent genuine missing data).
+ */
+fun List<HalfHourPoint>.trimMissingConsumption(): List<HalfHourPoint> {
+    if (isEmpty()) return this
+    // Only trim if there is at least one point with positive consumption —
+    // otherwise the entire series has no usage data and trimming is pointless.
+    if (none { (it.consumptionKwh ?: 0.0) > 0.0 }) return this
+    val firstWithData = indexOfFirst { (it.consumptionKwh ?: 0.0) > 0.0 }
+    val lastWithData = indexOfLast { (it.consumptionKwh ?: 0.0) > 0.0 }
+    return subList(firstWithData, lastWithData + 1)
+}
+
+/**
  * Bins half-hour points into larger time intervals for compact chart display.
  * Chooses bin size based on the number of data points:
  *   ≤ 48  (1 day)    → no binning
@@ -148,7 +166,7 @@ object ChartFormatters {
 object ChartColors {
     val PriceLine = Color(0xFF6750A4)
     val PriceLineFill = Color(0x406750A4)
-    val ConsumptionLine = Color(0xFF386A20)
-    val ConsumptionLineFill = Color(0x40386A20)
+    val ConsumptionLine = Color(0xFF1976D2)
+    val ConsumptionLineFill = Color(0x401976D2)
     val Marker = Color(0xFF6750A4)
 }

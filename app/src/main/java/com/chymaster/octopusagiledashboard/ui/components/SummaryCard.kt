@@ -1,5 +1,6 @@
 package com.chymaster.octopusagiledashboard.ui.components
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -22,6 +23,8 @@ fun SummaryCards(
     avgPrice: Double?,
     minPrice: Double?,
     maxPrice: Double?,
+    onTotalCostClick: () -> Unit = {},
+    onUsageClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     Row(
@@ -33,12 +36,16 @@ fun SummaryCards(
         SummaryCard(
             title = "Total Cost",
             value = if (totalCost != null) formatCost(totalCost) else "–",
-            modifier = Modifier.weight(1f)
+            modifier = Modifier
+                .weight(1f)
+                .clickable(onClick = onTotalCostClick)
         )
         SummaryCard(
             title = "Usage",
             value = if (totalKwh != null) String.format(java.util.Locale.UK, "%.1f kWh", totalKwh) else "–",
-            modifier = Modifier.weight(1f)
+            modifier = Modifier
+                .weight(1f)
+                .clickable(onClick = onUsageClick)
         )
         SummaryCard(
             title = "Avg Price",

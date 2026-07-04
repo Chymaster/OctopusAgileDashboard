@@ -3,9 +3,9 @@ package com.chymaster.octopusagiledashboard.ui.theme
 import androidx.compose.ui.graphics.Color
 
 object PriceColors {
-    // Percentage thresholds relative to Flexible Octopus Price
-    const val CHEAP_FACTOR = 0.70    // Below 70% → Green
-    const val MODERATE_FACTOR = 1.20 // 70%–120% → Amber
+    // Default percentage thresholds relative to Flexible Octopus Price
+    const val DEFAULT_CHEAP_PERCENT = 70     // Below 70% → Green
+    const val DEFAULT_MODERATE_PERCENT = 120 // 70%–120% → Amber
     // Above 120% → Red
 
     val Cheap = Color(0xFF2E7D32)      // Green
@@ -16,23 +16,33 @@ object PriceColors {
      * Returns a colour for [price] based on its ratio to [referencePrice]
      * (the Flexible Octopus tariff price).
      *
-     * - Below 70 % of reference → Green
-     * - 70 %–120 % of reference → Amber
-     * - Above 120 % of reference → Red
+     * - Below [cheapPercent] % of reference → Green
+     * - [cheapPercent] %–[moderatePercent] % of reference → Amber
+     * - Above [moderatePercent] % of reference → Red
      *
      * Falls back to Amber when [referencePrice] is null or zero.
      */
-    fun priceColor(price: Double, referencePrice: Double?): Color {
+    fun priceColor(
+        price: Double,
+        referencePrice: Double?,
+        cheapPercent: Int = DEFAULT_CHEAP_PERCENT,
+        moderatePercent: Int = DEFAULT_MODERATE_PERCENT
+    ): Color {
         if (referencePrice == null || referencePrice == 0.0) return Moderate
         val ratio = price / referencePrice
+        val cheapFactor = cheapPercent / 100.0
+        val moderateFactor = moderatePercent / 100.0
         return when {
-            ratio < CHEAP_FACTOR -> Cheap
-            ratio <= MODERATE_FACTOR -> Moderate
+            ratio < cheapFactor -> Cheap
+            ratio <= moderateFactor -> Moderate
             else -> Expensive
         }
     }
 
     /** Compute the absolute price thresholds from a reference price. */
-    fun cheapThreshold(referencePrice: Double): Double = referencePrice * CHEAP_FACTOR
-    fun moderateThreshold(referencePrice: Double): Double = referencePrice * MODERATE_FACTOR
+    fun cheapThreshold(referencePrice: Double, cheapPercent: Int = DEFAULT_CHEAP_PERCENT): Double =
+        referencePrice * cheapPercent / 100.0
+
+    fun moderateThreshold(referencePrice: Double, moderatePercent: Int = DEFAULT_MODERATE_PERCENT): Double =
+        referencePrice * moderatePercent / 100.0
 }

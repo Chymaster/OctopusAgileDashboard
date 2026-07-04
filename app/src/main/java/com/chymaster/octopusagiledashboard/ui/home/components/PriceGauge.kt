@@ -41,6 +41,8 @@ import kotlin.math.sin
 fun PriceGauge(
     currentPrice: Double?,
     referencePrice: Double?,
+    cheapPercent: Int = PriceColors.DEFAULT_CHEAP_PERCENT,
+    moderatePercent: Int = PriceColors.DEFAULT_MODERATE_PERCENT,
     modifier: Modifier = Modifier
 ) {
     val labelColor = MaterialTheme.colorScheme.onSurfaceVariant
@@ -67,8 +69,8 @@ fun PriceGauge(
     // Threshold stops for colored arc segments (relative to Flexible Octopus Price)
     val thresholds = if (referencePrice != null && referencePrice > 0) {
         listOf(
-            PriceColors.cheapThreshold(referencePrice) to PriceColors.Cheap,
-            PriceColors.moderateThreshold(referencePrice) to PriceColors.Moderate,
+            PriceColors.cheapThreshold(referencePrice, cheapPercent) to PriceColors.Cheap,
+            PriceColors.moderateThreshold(referencePrice, moderatePercent) to PriceColors.Moderate,
             maxPrice to PriceColors.Expensive
         ).filter { it.first > minPrice }
     } else {

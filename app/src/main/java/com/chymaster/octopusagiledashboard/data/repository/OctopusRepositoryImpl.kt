@@ -3,6 +3,7 @@ package com.chymaster.octopusagiledashboard.data.repository
 import com.chymaster.octopusagiledashboard.core.util.Constants
 import com.chymaster.octopusagiledashboard.data.local.dao.AgilePriceDao
 import com.chymaster.octopusagiledashboard.data.local.dao.ConsumptionDao
+import com.chymaster.octopusagiledashboard.data.local.dao.StandingChargeDao
 import com.chymaster.octopusagiledashboard.data.mapper.toDomain
 import com.chymaster.octopusagiledashboard.data.mapper.toEntity
 import com.chymaster.octopusagiledashboard.data.prefs.UserPreferencesRepository
@@ -12,6 +13,7 @@ import com.chymaster.octopusagiledashboard.data.remote.dto.PaginatedResponse
 import com.chymaster.octopusagiledashboard.domain.model.AgilePrice
 import com.chymaster.octopusagiledashboard.domain.model.ConsumptionRecord
 import com.chymaster.octopusagiledashboard.domain.model.HalfHourPoint
+import com.chymaster.octopusagiledashboard.domain.model.StandingCharge
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -40,6 +42,7 @@ class OctopusRepositoryImpl @Inject constructor(
     private val apiService: OctopusApiService,
     private val agilePriceDao: AgilePriceDao,
     private val consumptionDao: ConsumptionDao,
+    private val standingChargeDao: StandingChargeDao,
     private val preferencesRepository: UserPreferencesRepository
 ) : OctopusRepository {
 
@@ -91,6 +94,42 @@ class OctopusRepositoryImpl @Inject constructor(
                 }
             })
         }.flowOn(Dispatchers.IO)
+    }
+
+    override fun observeStandingCharges(start: Instant, end: Instant): Flow<List<StandingCharge>> {
+        return standingChargeDao.observeRange(start.toEpochMilli(), end.toEpochMilli())
+            .map { entities -> entities.map { it.toDomain() } }
+            .flowOn(Dispatchers.IO)
+    }
+
+    override suspend fun refreshStandingCharges(start: Instant, end: Instant): Result<Unit> {
+        return withContext(Dispatchers.IO) {
+            try {
+                val tariffConfig = preferencesRepository.tariffConfig.first()
+
+                val startStr = DateTimeFormatter.ISO_INSTANT.format(start)
+                val endStr = DateTimeFormatter.ISO_INSTANT.format(end)
+
+                val response = apiService.getStandingCharges(
+                    product = tariffConfig.productCode,
+                    tariff = tariffConfig.tariffCode,
+                    periodFrom = startStr,
+                    periodTo = endStr
+                )
+
+                if (response.isSuccessful) {
+                    val body = response.body()
+                        ?: return@withContext Result.failure(Exception("Empty response"))
+                    val entities = body.results.map { it.toEntity(tariffConfig.tariffCode) }
+                    standingChargeDao.insertAll(entities)
+                    Result.success(Unit)
+                } else {
+                    Result.failure(Exception("API error: ${response.code()} ${response.message()}"))
+                }
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
+        }
     }
 
     override suspend fun refreshAgilePrices(start: Instant, end: Instant): Result<Unit> {

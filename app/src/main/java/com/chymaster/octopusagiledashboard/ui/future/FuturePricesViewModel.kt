@@ -23,7 +23,9 @@ data class FuturePricesUiState(
     val isRefreshing: Boolean = false,
     val prices: List<AgilePrice> = emptyList(),
     val flexiblePrice: Double? = null,
-    val error: String? = null
+    val error: String? = null,
+    val cheapThresholdPercent: Int = 70,
+    val moderateThresholdPercent: Int = 120
 )
 
 @HiltViewModel
@@ -45,6 +47,18 @@ class FuturePricesViewModel @Inject constructor(
 
     init {
         dataJob = loadData()
+
+        // Observe threshold preferences
+        viewModelScope.launch {
+            preferencesRepository.cheapThresholdPercentFlow.collect { percent ->
+                _uiState.update { it.copy(cheapThresholdPercent = percent) }
+            }
+        }
+        viewModelScope.launch {
+            preferencesRepository.moderateThresholdPercentFlow.collect { percent ->
+                _uiState.update { it.copy(moderateThresholdPercent = percent) }
+            }
+        }
     }
 
     fun onRefresh() {

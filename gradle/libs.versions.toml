@@ -17,6 +17,7 @@ okhttp = "4.12.0"
 kotlinxSerialization = "1.8.1"
 kotlinxSerializationConverter = "1.0.0"
 datastore = "1.1.7"
+securityCrypto = "1.1.0-alpha06"
 navigationCompose = "2.9.0"
 vico = "3.2.3"
 coroutines = "1.10.2"
@@ -59,6 +60,9 @@ kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-
 
 # DataStore
 androidx-datastore-preferences = { group = "androidx.datastore", name = "datastore-preferences", version.ref = "datastore" }
+
+# Security (EncryptedSharedPreferences)
+androidx-security-crypto = { group = "androidx.security", name = "security-crypto", version.ref = "securityCrypto" }
 
 # Navigation
 androidx-navigation-compose = { group = "androidx.navigation", name = "navigation-compose", version.ref = "navigationCompose" }

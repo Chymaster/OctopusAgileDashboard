@@ -66,15 +66,7 @@ fun HomeScreen(
         topBar = {
             TopAppBar(
                 title = {
-                    Column {
-                        Text("Octopus Dashboard")
-                        // TODO: Wire real tariff name and address from user settings
-                        Text(
-                            "Agile Octopus · 14 Linley Rd",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
+                    Text("Octopus Dashboard")
                 },
                 navigationIcon = {
                     IconButton(onClick = onOpenDrawer) {
@@ -139,6 +131,8 @@ fun HomeScreen(
                                 PriceGauge(
                                     currentPrice = uiState.currentAgilePrice,
                                     referencePrice = uiState.flexiblePrice,
+                                    cheapPercent = uiState.cheapThresholdPercent,
+                                    moderatePercent = uiState.moderateThresholdPercent,
                                     modifier = Modifier
                                         .fillMaxSize()
                                         .padding(12.dp)
@@ -201,6 +195,8 @@ fun HomeScreen(
                                 prices = uiState.priceTimeline,
                                 currentPriceStartTime = uiState.currentPriceStartTime,
                                 referencePrice = uiState.flexiblePrice,
+                                cheapPercent = uiState.cheapThresholdPercent,
+                                moderatePercent = uiState.moderateThresholdPercent,
                                 modifier = Modifier
                                     .fillMaxSize()
                                     .padding(16.dp)

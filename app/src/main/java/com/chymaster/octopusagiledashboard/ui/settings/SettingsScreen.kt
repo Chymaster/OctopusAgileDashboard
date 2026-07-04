@@ -1,5 +1,6 @@
 package com.chymaster.octopusagiledashboard.ui.settings
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -13,6 +14,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
@@ -53,6 +55,7 @@ import com.chymaster.octopusagiledashboard.core.util.Constants
 fun SettingsScreen(
     onNavigateBack: () -> Unit,
     showBackButton: Boolean = true,
+    onNavigateToAdvancedSettings: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -261,6 +264,33 @@ fun SettingsScreen(
                     style = MaterialTheme.typography.bodySmall
                 )
             }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Divider
+            androidx.compose.material3.HorizontalDivider()
+
+            // Advanced Settings
+            androidx.compose.material3.ListItem(
+                headlineContent = { Text("Advanced Settings") },
+                supportingContent = {
+                    Text(
+                        "Price colour thresholds, display options",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                },
+                trailingContent = {
+                    Icon(
+                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onNavigateToAdvancedSettings() }
+            )
 
             Spacer(modifier = Modifier.height(24.dp))
         }

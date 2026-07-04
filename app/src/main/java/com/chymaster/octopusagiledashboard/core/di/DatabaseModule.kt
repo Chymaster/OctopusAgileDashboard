@@ -5,6 +5,7 @@ import androidx.room.Room
 import com.chymaster.octopusagiledashboard.data.local.OctopusDatabase
 import com.chymaster.octopusagiledashboard.data.local.dao.AgilePriceDao
 import com.chymaster.octopusagiledashboard.data.local.dao.ConsumptionDao
+import com.chymaster.octopusagiledashboard.data.local.dao.StandingChargeDao
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -23,7 +24,7 @@ object DatabaseModule {
             context,
             OctopusDatabase::class.java,
             "octopus_database"
-        ).build()
+        ).fallbackToDestructiveMigration(dropAllTables = true).build()
     }
 
     @Provides
@@ -34,5 +35,10 @@ object DatabaseModule {
     @Provides
     fun provideConsumptionDao(database: OctopusDatabase): ConsumptionDao {
         return database.consumptionDao()
+    }
+
+    @Provides
+    fun provideStandingChargeDao(database: OctopusDatabase): StandingChargeDao {
+        return database.standingChargeDao()
     }
 }

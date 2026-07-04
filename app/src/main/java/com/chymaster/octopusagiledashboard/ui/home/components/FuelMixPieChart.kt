@@ -75,9 +75,7 @@ fun FuelMixPieChart(
 
         Box(
             contentAlignment = Alignment.Center,
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f, fill = false)
+            modifier = Modifier.size(160.dp)
         ) {
             Canvas(modifier = Modifier.fillMaxSize()) {
                 val strokeWidth = 28.dp.toPx()
