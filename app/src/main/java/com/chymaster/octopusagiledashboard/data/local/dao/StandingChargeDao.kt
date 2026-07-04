@@ -1,0 +1,21 @@
+package com.chymaster.octopusagiledashboard.data.local.dao
+
+import androidx.room.Dao
+import androidx.room.Insert
+import androidx.room.OnConflictStrategy
+import androidx.room.Query
+import com.chymaster.octopusagiledashboard.data.local.entity.StandingChargeEntity
+import kotlinx.coroutines.flow.Flow
+
+@Dao
+interface StandingChargeDao {
+
+    @Query("SELECT * FROM standing_charges WHERE validFrom <= :endMillis AND validTo >= :startMillis ORDER BY validFrom ASC")
+    fun observeRange(startMillis: Long, endMillis: Long): Flow<List<StandingChargeEntity>>
+
+    @Query("SELECT * FROM standing_charges ORDER BY validFrom DESC LIMIT 1")
+    suspend fun getCurrent(): StandingChargeEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(items: List<StandingChargeEntity>)
+}
