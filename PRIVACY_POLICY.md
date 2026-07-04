@@ -115,7 +115,7 @@ We may update this privacy policy from time to time. Changes will be reflected b
 If you have questions about this privacy policy or the App's data practices, please contact:
 
 - **Developer**: Chymaster
-- **Email**: [YOUR_EMAIL_ADDRESS]
+- **Email**: contact@chymaster.com
 
 ---
 
