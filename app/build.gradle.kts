@@ -7,11 +7,11 @@ plugins {
 }
 
 android {
-    namespace = "com.example.octopusdashboard"
+    namespace = "com.chymaster.octopusagiledashboard"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.example.octopusdashboard"
+        applicationId = "com.chymaster.octopusagiledashboard"
         minSdk = 26
         targetSdk = 36
         versionCode = 1
