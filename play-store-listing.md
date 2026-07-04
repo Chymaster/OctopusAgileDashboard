@@ -6,7 +6,7 @@ Octopus Dashboard
 
 ## Short description (max 80 characters)
 
-Privacy-first Octopus Agile tracker. Your data never leave your device.
+Open-source Octopus Agile tracker. Your data never leave your device.
 
 ## Full description
 
