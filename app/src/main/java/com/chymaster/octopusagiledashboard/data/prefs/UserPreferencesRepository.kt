@@ -138,8 +138,8 @@ class UserPreferencesRepository @Inject constructor(
     /** Cheap/green threshold as a percentage of the flexible price (default 70%). */
     val cheapThresholdPercentFlow: Flow<Int> = dataStore.data.map { it[CHEAP_THRESHOLD_PERCENT] ?: 70 }
 
-    /** Moderate/amber threshold as a percentage of the flexible price (default 120%). */
-    val moderateThresholdPercentFlow: Flow<Int> = dataStore.data.map { it[MODERATE_THRESHOLD_PERCENT] ?: 120 }
+    /** Moderate/amber threshold as a percentage of the flexible price (default 130%). */
+    val moderateThresholdPercentFlow: Flow<Int> = dataStore.data.map { it[MODERATE_THRESHOLD_PERCENT] ?: 130 }
 
     suspend fun saveCheapThresholdPercent(percent: Int) {
         dataStore.edit { it[CHEAP_THRESHOLD_PERCENT] = percent }

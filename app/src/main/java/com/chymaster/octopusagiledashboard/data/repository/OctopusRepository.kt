@@ -23,6 +23,13 @@ interface OctopusRepository {
 
     suspend fun refreshStandingCharges(start: Instant, end: Instant): Result<Unit>
 
+    /**
+     * Wipe every cached entity from the local Room database. Called on every
+     * credential flip (demo ↔ real) so stale data from the previous state
+     * does not flash on the chart after the switch.
+     */
+    suspend fun purgeAllUserData()
+
     suspend fun fetchMeterGsp(mpan: String): Result<String>
 
     suspend fun testConnection(): Result<Unit>

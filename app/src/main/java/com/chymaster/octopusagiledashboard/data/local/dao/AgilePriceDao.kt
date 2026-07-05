@@ -24,4 +24,7 @@ interface AgilePriceDao {
 
     @Query("SELECT COUNT(*) FROM agile_prices WHERE validFrom >= :startMillis AND validTo <= :endMillis")
     suspend fun countInRange(startMillis: Long, endMillis: Long): Int
+
+    @Query("DELETE FROM agile_prices")
+    suspend fun deleteAll()
 }
