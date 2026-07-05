@@ -219,15 +219,25 @@ private fun DetailedFuelMixPieChart(
     onSliceSelected: (FuelMix?) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val colors = remember(fuelMix) {
-        fuelMix.map { entry -> FUEL_COLORS[entry.fuel] ?: Color(0xFFBDBDBD) }
+    // Order fuels so low-carbon sources come first (aligned under the outer
+    // ring's green section) followed by high-carbon sources.
+    val orderedFuelMix = remember(fuelMix) {
+        val low = fuelMix.filter { it.fuel in LOW_CARBON_FUELS && it.percentage > 0.0 }
+            .sortedByDescending { it.percentage }
+        val high = fuelMix.filter { it.fuel !in LOW_CARBON_FUELS && it.percentage > 0.0 }
+            .sortedByDescending { it.percentage }
+        low + high
     }
 
-    // Pre-compute arc angles so the tap detector can identify which slice
-    // was hit without recomputing every time.
-    val arcRanges = remember(fuelMix) {
+    val colors = remember(orderedFuelMix) {
+        orderedFuelMix.map { entry -> FUEL_COLORS[entry.fuel] ?: Color(0xFFBDBDBD) }
+    }
+
+    // Pre-compute arc angles for the inner (per-fuel) ring so the tap
+    // detector can identify which slice was hit.
+    val arcRanges = remember(orderedFuelMix) {
         var startAngle = -90f
-        fuelMix.map { entry ->
+        orderedFuelMix.map { entry ->
             val sweep = (entry.percentage / 100f * 360f).toFloat()
             val range = startAngle to (startAngle + sweep)
             startAngle += sweep
@@ -246,45 +256,41 @@ private fun DetailedFuelMixPieChart(
         Canvas(
             modifier = Modifier
                 .fillMaxSize()
-                .pointerInput(fuelMix) {
+                .pointerInput(orderedFuelMix) {
                     detectTapGestures { offset ->
-                        val strokeWidthPx = 30.dp.toPx()
+                        val outerStrokePx = 3.dp.toPx()
+                        val innerStrokePx = 16.dp.toPx()
                         val minSide = minOf(size.width, size.height).toFloat()
-                        val diameter = minSide - strokeWidthPx
-                        val radius = diameter / 2f
+                        val outerDiameter = minSide - outerStrokePx
+                        val innerDiameter = outerDiameter - outerStrokePx - innerStrokePx - 6.dp.toPx()
+                        val innerRadius = innerDiameter / 2f
                         val center = Offset(size.width / 2f, size.height / 2f)
 
-                        // Distance from center of donut.
                         val dx = offset.x - center.x
                         val dy = offset.y - center.y
                         val dist = sqrt(dx * dx + dy * dy)
 
-                        // Only register taps within the donut ring
-                        // (between inner and outer edge of the stroke).
-                        if (dist < radius - strokeWidthPx / 2f ||
-                            dist > radius + strokeWidthPx / 2f
+                        // Only register taps within the inner (per-fuel) ring.
+                        if (dist < innerRadius - innerStrokePx / 2f ||
+                            dist > innerRadius + innerStrokePx / 2f
                         ) {
-                            onSliceSelected(null) // tapped outside the ring
+                            onSliceSelected(null)
                             return@detectTapGestures
                         }
 
-                        // Convert tap position to angle in degrees
-                        // (same coordinate system: -90° is 12 o'clock).
                         val angle = Math.toDegrees(
                             atan2(dy.toDouble(), dx.toDouble())
                         ).toFloat()
                         val normalisedAngle = if (angle < -90f) angle + 360f else angle
 
-                        // Find which slice this angle falls into.
-                        val tapped = fuelMix.indices.firstOrNull { i ->
+                        val tapped = orderedFuelMix.indices.firstOrNull { i ->
                             val (start, end) = arcRanges[i]
-                            normalisedAngle in start..end && fuelMix[i].percentage > 0.0
+                            normalisedAngle in start..end && orderedFuelMix[i].percentage > 0.0
                         }
                         if (tapped != null) {
-                            // Toggle off if tapping the same slice again.
                             onSliceSelected(
-                                if (fuelMix[tapped] == selectedFuel) null
-                                else fuelMix[tapped]
+                                if (orderedFuelMix[tapped] == selectedFuel) null
+                                else orderedFuelMix[tapped]
                             )
                         } else {
                             onSliceSelected(null)
@@ -292,39 +298,75 @@ private fun DetailedFuelMixPieChart(
                     }
                 }
         ) {
-            val strokeWidth = 30.dp.toPx()
-            val diameter = size.minDimension - strokeWidth
-            val topLeft = Offset(
-                (size.width - diameter) / 2f,
-                (size.height - diameter) / 2f
+            // ── Outer ring: low carbon vs high carbon ──
+            val outerStroke = 3.dp.toPx()
+            val outerDiameter = size.minDimension - outerStroke
+            val outerTopLeft = Offset(
+                (size.width - outerDiameter) / 2f,
+                (size.height - outerDiameter) / 2f
             )
-            val arcSize = Size(diameter, diameter)
+            val outerArcSize = Size(outerDiameter, outerDiameter)
 
-            // Walk the slice list in API order, accumulating the start
-            // angle. Any zero-percent entry is skipped so the donut stays
-            // gapless.
-            var startAngle = -90f
-            for (i in fuelMix.indices) {
-                val sweepAngle = (fuelMix[i].percentage / 100f * 360f).toFloat()
+            val lowCarbonPct = orderedFuelMix
+                .filter { it.fuel in LOW_CARBON_FUELS }
+                .sumOf { it.percentage }
+            val lowSweep = (lowCarbonPct.coerceIn(0.0, 100.0) / 100f * 360f).toFloat()
+            val highSweep = ((100.0 - lowCarbonPct).coerceIn(0.0, 100.0) / 100f * 360f).toFloat()
+
+            if (lowSweep > 0f) {
+                drawArc(
+                    color = BrandColors.LowCarbonGreen,
+                    startAngle = -90f,
+                    sweepAngle = lowSweep,
+                    useCenter = false,
+                    topLeft = outerTopLeft,
+                    size = outerArcSize,
+                    style = Stroke(width = outerStroke)
+                )
+            }
+            if (highSweep > 0f) {
+                drawArc(
+                    color = BrandColors.HighCarbon,
+                    startAngle = -90f + lowSweep,
+                    sweepAngle = highSweep,
+                    useCenter = false,
+                    topLeft = outerTopLeft,
+                    size = outerArcSize,
+                    style = Stroke(width = outerStroke)
+                )
+            }
+
+            // ── Inner ring: per-fuel breakdown ──
+            val innerStroke = 16.dp.toPx()
+            val innerDiameter = outerDiameter - outerStroke - innerStroke - 6.dp.toPx()
+            val innerTopLeft = Offset(
+                (size.width - innerDiameter) / 2f,
+                (size.height - innerDiameter) / 2f
+            )
+            val innerArcSize = Size(innerDiameter, innerDiameter)
+
+            var innerStartAngle = -90f
+            for (i in orderedFuelMix.indices) {
+                val sweepAngle = (orderedFuelMix[i].percentage / 100f * 360f).toFloat()
                 if (sweepAngle > 0f) {
-                    val isSelected = fuelMix[i] == selectedFuel
+                    val isSelected = orderedFuelMix[i] == selectedFuel
                     drawArc(
                         color = colors[i].let { c ->
                             if (selectedFuel != null && !isSelected) c.copy(alpha = 0.35f)
                             else c
                         },
-                        startAngle = startAngle,
+                        startAngle = innerStartAngle,
                         sweepAngle = sweepAngle,
                         useCenter = false,
-                        topLeft = topLeft,
-                        size = arcSize,
+                        topLeft = innerTopLeft,
+                        size = innerArcSize,
                         style = Stroke(
-                            width = if (isSelected) strokeWidth + 4.dp.toPx()
-                            else strokeWidth
+                            width = if (isSelected) innerStroke + 4.dp.toPx()
+                            else innerStroke
                         )
                     )
                 }
-                startAngle += sweepAngle
+                innerStartAngle += sweepAngle
             }
         }
 

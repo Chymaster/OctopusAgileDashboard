@@ -47,10 +47,10 @@ internal val FUEL_COLORS: Map<String, Color> = mapOf(
 )
 
 /**
- * Nested grid-mix donut: an **inner ring** shows the two-way low/high carbon
- * split and an **outer ring** breaks the mix down by individual fuel source.
- * Low-carbon fuels in the outer ring are always grouped under the green
- * section of the inner ring so the two layers read as one picture.
+ * Nested grid-mix donut: an **outer ring** shows the two-way low/high carbon
+ * split and an **inner ring** breaks the mix down by individual fuel source.
+ * Low-carbon fuels in the inner ring are always grouped under the green
+ * section of the outer ring so the two layers read as one picture.
  *
  * Tapping anywhere opens the full detail sheet.
  */
@@ -63,7 +63,7 @@ fun FuelMixPieChart(
 ) {
     val labelColor = MaterialTheme.colorScheme.onSurfaceVariant
 
-    // Order fuels so low-carbon sources come first (aligned under the inner
+    // Order fuels so low-carbon sources come first (aligned under the outer
     // ring's green segment) followed by high-carbon sources.
     val orderedFuelMix = remember(fuelMix) {
         val low = fuelMix.filter { it.fuel in LOW_CARBON_FUELS && it.percentage > 0.0 }
@@ -95,14 +95,14 @@ fun FuelMixPieChart(
             modifier = Modifier.size(150.dp)
         ) {
             Canvas(modifier = Modifier.fillMaxSize()) {
-                // ── Inner ring: low carbon vs high carbon ──
-                val innerStroke = 22.dp.toPx()
-                val innerDiameter = size.minDimension - innerStroke
-                val innerTopLeft = Offset(
-                    (size.width - innerDiameter) / 2f,
-                    (size.height - innerDiameter) / 2f
+                // ── Outer ring: low carbon vs high carbon ──
+                val outerStroke = 3.dp.toPx()
+                val outerDiameter = size.minDimension - outerStroke
+                val outerTopLeft = Offset(
+                    (size.width - outerDiameter) / 2f,
+                    (size.height - outerDiameter) / 2f
                 )
-                val innerArcSize = Size(innerDiameter, innerDiameter)
+                val outerArcSize = Size(outerDiameter, outerDiameter)
 
                 val lowSweep = (lowCarbonPercentage.coerceIn(0.0, 100.0) / 100f * 360f).toFloat()
                 val highSweep = ((100.0 - lowCarbonPercentage).coerceIn(0.0, 100.0) / 100f * 360f).toFloat()
@@ -113,9 +113,9 @@ fun FuelMixPieChart(
                         startAngle = -90f,
                         sweepAngle = lowSweep,
                         useCenter = false,
-                        topLeft = innerTopLeft,
-                        size = innerArcSize,
-                        style = Stroke(width = innerStroke)
+                        topLeft = outerTopLeft,
+                        size = outerArcSize,
+                        style = Stroke(width = outerStroke)
                     )
                 }
                 if (highSweep > 0f) {
@@ -124,38 +124,38 @@ fun FuelMixPieChart(
                         startAngle = -90f + lowSweep,
                         sweepAngle = highSweep,
                         useCenter = false,
-                        topLeft = innerTopLeft,
-                        size = innerArcSize,
-                        style = Stroke(width = innerStroke)
+                        topLeft = outerTopLeft,
+                        size = outerArcSize,
+                        style = Stroke(width = outerStroke)
                     )
                 }
 
-                // ── Outer ring: per-fuel breakdown ──
+                // ── Inner ring: per-fuel breakdown ──
                 // Low-carbon fuels are listed first so their arcs sweep
-                // under the green section of the inner ring.
-                val outerStroke = 16.dp.toPx()
-                val outerDiameter = innerDiameter - innerStroke - outerStroke - 6.dp.toPx()
-                val outerTopLeft = Offset(
-                    (size.width - outerDiameter) / 2f,
-                    (size.height - outerDiameter) / 2f
+                // under the green section of the outer ring.
+                val innerStroke = 16.dp.toPx()
+                val innerDiameter = outerDiameter - outerStroke - innerStroke - 6.dp.toPx()
+                val innerTopLeft = Offset(
+                    (size.width - innerDiameter) / 2f,
+                    (size.height - innerDiameter) / 2f
                 )
-                val outerArcSize = Size(outerDiameter, outerDiameter)
+                val innerArcSize = Size(innerDiameter, innerDiameter)
 
-                var outerStartAngle = -90f
+                var innerStartAngle = -90f
                 for (entry in orderedFuelMix) {
                     val sweepAngle = (entry.percentage / 100f * 360f).toFloat()
                     if (sweepAngle > 0f) {
                         drawArc(
                             color = FUEL_COLORS[entry.fuel] ?: Color(0xFFBDBDBD),
-                            startAngle = outerStartAngle,
+                            startAngle = innerStartAngle,
                             sweepAngle = sweepAngle,
                             useCenter = false,
-                            topLeft = outerTopLeft,
-                            size = outerArcSize,
-                            style = Stroke(width = outerStroke)
+                            topLeft = innerTopLeft,
+                            size = innerArcSize,
+                            style = Stroke(width = innerStroke)
                         )
                     }
-                    outerStartAngle += sweepAngle
+                    innerStartAngle += sweepAngle
                 }
             }
 
