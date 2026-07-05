@@ -49,7 +49,7 @@ fun SummaryCards(
         )
         SummaryCard(
             title = "Avg Price",
-            value = if (avgPrice != null) String.format(java.util.Locale.UK, "%.1f p", avgPrice) else "–",
+            value = if (avgPrice != null) String.format(java.util.Locale.UK, "%.1f p/kWh", avgPrice) else "–",
             modifier = Modifier.weight(1f)
         )
     }
