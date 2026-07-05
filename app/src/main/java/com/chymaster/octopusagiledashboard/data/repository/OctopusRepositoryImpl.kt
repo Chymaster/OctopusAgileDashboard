@@ -48,24 +48,16 @@ class OctopusRepositoryImpl @Inject constructor(
 ) : OctopusRepository {
 
     override fun observeAgilePrices(start: Instant, end: Instant): Flow<List<AgilePrice>> = flow {
-        if (isDemoMode()) {
-            // Demo: read from the in-memory cache seeded by DashboardViewModel
-            // (or by whichever screen is observing). The cache is pre-populated
-            // before observation starts so the first emission is non-empty.
-            val startMs = start.toEpochMilli()
-            val endMs = end.toEpochMilli()
-            emitAll(
-                demoCacheStore.prices
-                    .map { all -> all.filter { it.validFrom >= startMs && it.validTo <= endMs } }
-                    .map { entities -> entities.map { it.toDomain() } }
-            )
-        } else {
-            // Real: read from Room (which is the source of truth for cached prices)
-            emitAll(
-                agilePriceDao.observeRange(start.toEpochMilli(), end.toEpochMilli())
-                    .map { entities -> entities.map { it.toDomain() } }
-            )
-        }
+        // Room is the source of truth for the Home / Future Prices timelines
+        // regardless of credential state. The public Agile prices endpoint is
+        // unauthenticated, so the Home screen shows real public prices even
+        // in demo mode. In demo mode, [refreshAgilePrices] writes the public
+        // API result to Room (with the demo tariff code) so this observation
+        // sees the same data.
+        emitAll(
+            agilePriceDao.observeRange(start.toEpochMilli(), end.toEpochMilli())
+                .map { entities -> entities.map { it.toDomain() } }
+        )
     }.flowOn(Dispatchers.IO)
 
     override fun observeConsumption(start: Instant, end: Instant): Flow<List<ConsumptionRecord>> = flow {
@@ -198,39 +190,33 @@ class OctopusRepositoryImpl @Inject constructor(
     override suspend fun refreshAgilePrices(start: Instant, end: Instant): Result<Unit> {
         return withContext(Dispatchers.IO) {
             try {
+                val tariffConfig = preferencesRepository.tariffConfig.first()
+                val startStr = DateTimeFormatter.ISO_INSTANT.format(start)
+                val endStr = DateTimeFormatter.ISO_INSTANT.format(end)
+                val allRates = fetchAllPages { url ->
+                    if (url != null) apiService.getAgileRatesByUrl(url)
+                    else apiService.getAgileRates(
+                        product = tariffConfig.productCode,
+                        tariff = tariffConfig.tariffCode,
+                        periodFrom = startStr,
+                        periodTo = endStr
+                    )
+                }
+
                 if (isDemoMode()) {
-                    // Demo: hit the same public (unauthenticated) Agile endpoint
-                    // as the real path, then write the result to the in-memory
-                    // cache instead of Room. This is what gives the demo chart
-                    // real prices where available, just like the real path.
-                    val tariffConfig = preferencesRepository.tariffConfig.first()
-                    val startStr = DateTimeFormatter.ISO_INSTANT.format(start)
-                    val endStr = DateTimeFormatter.ISO_INSTANT.format(end)
-                    val allRates = fetchAllPages { url ->
-                        if (url != null) apiService.getAgileRatesByUrl(url)
-                        else apiService.getAgileRates(
-                            product = tariffConfig.productCode,
-                            tariff = tariffConfig.tariffCode,
-                            periodFrom = startStr,
-                            periodTo = endStr
-                        )
-                    }
-                    val entities = allRates.map { it.toEntity(DemoDataGenerator.DemoIdentifiers.TARIFF) }
+                    // Demo: write the public API result to BOTH the in-memory
+                    // demo cache (so the Dashboard's observeDashboardData sees
+                    // the fresh real prices) AND to Room (so the Home /
+                    // Future Prices timelines continue to show real public
+                    // prices via observeAgilePrices, which always reads from
+                    // Room). The tariff code is the demo sentinel so the
+                    // real-mode refresh's INSERT REPLACE will overwrite these
+                    // rows by primary key when the user adds credentials.
+                    val entities = allRates.map { it.toEntity(DemoIdentifiers.TARIFF) }
                     demoCacheStore.overwritePrices(entities)
+                    agilePriceDao.insertAll(entities)
                     Result.success(Unit)
                 } else {
-                    val tariffConfig = preferencesRepository.tariffConfig.first()
-                    val startStr = DateTimeFormatter.ISO_INSTANT.format(start)
-                    val endStr = DateTimeFormatter.ISO_INSTANT.format(end)
-                    val allRates = fetchAllPages { url ->
-                        if (url != null) apiService.getAgileRatesByUrl(url)
-                        else apiService.getAgileRates(
-                            product = tariffConfig.productCode,
-                            tariff = tariffConfig.tariffCode,
-                            periodFrom = startStr,
-                            periodTo = endStr
-                        )
-                    }
                     // Insert with REPLACE strategy — no delete-first, avoids flash of empty data
                     val entities = allRates.map { it.toEntity(tariffConfig.tariffCode) }
                     agilePriceDao.insertAll(entities)
