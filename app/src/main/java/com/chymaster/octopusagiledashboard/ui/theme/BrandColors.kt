@@ -13,4 +13,6 @@ object BrandColors {
     val TealDark = Color(0xFF00695C)
     /** Green for "low carbon" callouts */
     val LowCarbonGreen = Color(0xFF1B5E20)
+    /** Deep orange for "high carbon" callouts (gas, coal, etc.) */
+    val HighCarbon = Color(0xFFBF360C)
 }
