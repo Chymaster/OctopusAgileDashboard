@@ -24,9 +24,9 @@ interface OctopusRepository {
     suspend fun refreshStandingCharges(start: Instant, end: Instant): Result<Unit>
 
     /**
-     * Wipe every cached entity from the local Room database. Called on a
-     * real → demo credential flip so the user does not see a flash of the
-     * previous user's data on the freshly-minted demo chart.
+     * Wipe every cached entity from the local Room database. Called on every
+     * credential flip (demo ↔ real) so stale data from the previous state
+     * does not flash on the chart after the switch.
      */
     suspend fun purgeAllUserData()
 
