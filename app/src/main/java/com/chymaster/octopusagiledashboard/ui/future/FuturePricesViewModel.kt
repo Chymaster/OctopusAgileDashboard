@@ -25,7 +25,7 @@ data class FuturePricesUiState(
     val flexiblePrice: Double? = null,
     val error: String? = null,
     val cheapThresholdPercent: Int = 70,
-    val moderateThresholdPercent: Int = 120
+    val moderateThresholdPercent: Int = 130
 )
 
 @HiltViewModel

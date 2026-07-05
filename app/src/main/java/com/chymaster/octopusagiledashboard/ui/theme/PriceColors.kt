@@ -5,8 +5,8 @@ import androidx.compose.ui.graphics.Color
 object PriceColors {
     // Default percentage thresholds relative to Flexible Octopus Price
     const val DEFAULT_CHEAP_PERCENT = 70     // Below 70% → Green
-    const val DEFAULT_MODERATE_PERCENT = 120 // 70%–120% → Amber
-    // Above 120% → Red
+    const val DEFAULT_MODERATE_PERCENT = 130 // 70%–130% → Amber
+    // Above 130% → Red
 
     val Cheap = Color(0xFF2E7D32)      // Green
     val Moderate = Color(0xFFF9A825)   // Amber
