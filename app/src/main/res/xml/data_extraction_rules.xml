@@ -1,19 +1,29 @@
-<?xml version="1.0" encoding="utf-8"?><!--
-   Sample data extraction rules file; uncomment and customize as necessary.
-   See https://developer.android.com/about/versions/12/backup-restore#xml-changes
-   for details.
--->
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Data extraction rules for Android 12+ (API 31+).
+     See https://developer.android.com/about/versions/12/backup-restore -->
 <data-extraction-rules>
     <cloud-backup>
-        <!-- TODO: Use <include> and <exclude> to control what is backed up.
-        <include .../>
-        <exclude .../>
-        -->
+        <!-- Exclude encrypted API key store -->
+        <exclude domain="sharedpref" path="octopus_secure_prefs.xml" />
+        <!-- Exclude plain DataStore preferences (MPAN, serial, cached prices) -->
+        <exclude domain="sharedpref" path="octopus_preferences.preferences_pb" />
+        <!-- Exclude Jetpack DataStore files -->
+        <exclude domain="file" path="datastore/octopus_preferences.preferences_pb" />
+        <!-- Exclude Room database (cached prices, consumption) -->
+        <exclude domain="database" path="octopus_database" />
+        <exclude domain="database" path="octopus_database-shm" />
+        <exclude domain="database" path="octopus_database-wal" />
     </cloud-backup>
-    <!--
     <device-transfer>
-        <include .../>
-        <exclude .../>
+        <!-- Exclude encrypted API key store -->
+        <exclude domain="sharedpref" path="octopus_secure_prefs.xml" />
+        <!-- Exclude plain DataStore preferences (MPAN, serial, cached prices) -->
+        <exclude domain="sharedpref" path="octopus_preferences.preferences_pb" />
+        <!-- Exclude Jetpack DataStore files -->
+        <exclude domain="file" path="datastore/octopus_preferences.preferences_pb" />
+        <!-- Exclude Room database (cached prices, consumption) -->
+        <exclude domain="database" path="octopus_database" />
+        <exclude domain="database" path="octopus_database-shm" />
+        <exclude domain="database" path="octopus_database-wal" />
     </device-transfer>
-    -->
 </data-extraction-rules>

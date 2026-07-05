@@ -69,7 +69,8 @@ fun AppNavGraph(
             NavHost(navController = navController, startDestination = Routes.HOME) {
                 composable(Routes.HOME) {
                     HomeScreen(
-                        onOpenDrawer = { scope.launch { drawerState.open() } }
+                        onOpenDrawer = { scope.launch { drawerState.open() } },
+                        onOpenSettings = { navController.navigate(Routes.SETTINGS) }
                     )
                 }
                 composable(Routes.DASHBOARD) {

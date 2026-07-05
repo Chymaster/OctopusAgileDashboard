@@ -49,6 +49,7 @@ import com.patrykandpatrick.vico.compose.cartesian.layer.rememberColumnCartesian
 import com.patrykandpatrick.vico.compose.cartesian.layer.rememberLineCartesianLayer
 import com.patrykandpatrick.vico.compose.cartesian.marker.CartesianMarker
 import com.patrykandpatrick.vico.compose.cartesian.marker.CartesianMarkerVisibilityListener
+import com.patrykandpatrick.vico.compose.cartesian.marker.DefaultCartesianMarker
 import com.patrykandpatrick.vico.compose.cartesian.rememberCartesianChart
 import com.patrykandpatrick.vico.compose.cartesian.rememberVicoScrollState
 import com.patrykandpatrick.vico.compose.cartesian.rememberVicoZoomState
@@ -62,7 +63,7 @@ import com.patrykandpatrick.vico.compose.common.data.ExtraStore
  * and usage (line, RIGHT Y axis in kWh) on a shared time axis.
  *
  * Price bars are ratio-coloured against [referencePrice] (the Flexible Octopus
- * tariff): green if < 70 %, amber if 70–120 %, red if > 120 %. When
+ * tariff): green if < 70 %, amber if 70–130 %, red if > 130 %. When
  * [referencePrice] is null the bars fall back to amber.
  */
 @Composable
@@ -163,7 +164,9 @@ fun PriceUsageChart(
     }
     val usageLineProvider = LineCartesianLayer.LineProvider.series(usageLine)
 
-    val marker = rememberPriceMarker(ChartFormatters.priceMarkerFormatter)
+    // No suffix — the dual-axis chart legend already indicates units, and a
+    // single suffix would incorrectly label both the price and usage series.
+    val marker = rememberPriceMarker(DefaultCartesianMarker.ValueFormatter.default())
     val markerListener = remember(trimmedPoints, useBinned, displayPoints, onPointTapped) {
         object : CartesianMarkerVisibilityListener {
             override fun onShown(marker: CartesianMarker, targets: List<CartesianMarker.Target>) {

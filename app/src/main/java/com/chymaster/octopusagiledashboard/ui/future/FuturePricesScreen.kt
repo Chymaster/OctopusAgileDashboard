@@ -34,7 +34,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -77,21 +80,39 @@ fun FuturePricesScreen(
         }.toSortedMap()
     }
 
-    // Find today's index and scroll to it on first load
+    // Find the index of the current 30-min slot. Falls back to today's
+    // section header if the data doesn't include the current time.
     val today = LocalDate.now(londonZone)
-    val todayIndex = remember(groupedPrices) {
+    val now = Instant.now()
+    val currentSlotIndex = remember(groupedPrices) {
         var index = 0
         for ((date, prices) in groupedPrices) {
-            if (date == today) return@remember index
             index++ // section header
-            index += prices.size
+            for (price in prices) {
+                if (price.validFrom <= now && price.validTo > now) {
+                    return@remember index
+                }
+                index++
+            }
+        }
+        // No current slot in the data — find today's section header instead.
+        var fallbackIndex = 0
+        for ((date, prices) in groupedPrices) {
+            if (date == today) return@remember fallbackIndex
+            fallbackIndex++ // section header
+            fallbackIndex += prices.size
         }
         0
     }
 
-    LaunchedEffect(Unit) {
-        if (todayIndex > 0) {
-            listState.animateScrollToItem(todayIndex)
+    // Track whether the initial scroll has happened so refreshes don't
+    // yank the user back to the current slot after they've scrolled away.
+    var hasScrolledInitially by rememberSaveable { mutableStateOf(false) }
+
+    LaunchedEffect(groupedPrices) {
+        if (!hasScrolledInitially && groupedPrices.isNotEmpty() && currentSlotIndex > 0) {
+            listState.animateScrollToItem(currentSlotIndex)
+            hasScrolledInitially = true
         }
     }
 
