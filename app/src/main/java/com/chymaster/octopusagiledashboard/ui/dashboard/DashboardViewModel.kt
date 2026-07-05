@@ -90,21 +90,22 @@ class DashboardViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
-            // Track credential state, and on a flip (demo↔real) reset the
-            // relevant cache and reload so the chart switches sources without
-            // a flash of stale data. On demo → real, the in-memory demo store
-            // is cleared. On real → demo, the local Room cache is purged so
-            // the previous user's prices and consumption do not show through
-            // on the freshly-minted demo chart.
+            // Track credential state, and on a flip (demo↔real) wipe BOTH
+            // caches and reload so the chart switches sources without a flash
+            // of stale data. The local Room cache is purged on every flip:
+            //  - demo → real: rows tagged with the demo tariff code linger in
+            //    Room from the public-API refresh in demo mode; without a
+            //    wipe they would briefly appear on the real Dashboard.
+            //  - real → demo: the previous user's prices and consumption
+            //    would otherwise flash on the freshly-minted demo chart.
+            // The in-memory demo store is also cleared, since the new path
+            // will re-seed it (demo) or no longer use it (real).
             var prev: Boolean? = null
             preferencesRepository.hasCredentials.collect { hasCreds ->
                 val flipped = prev != null && prev != hasCreds
                 if (flipped) {
-                    if (hasCreds) {
-                        demoCacheStore.clearAll()
-                    } else {
-                        repository.purgeAllUserData()
-                    }
+                    demoCacheStore.clearAll()
+                    repository.purgeAllUserData()
                     dataJob?.cancel()
                     dataJob = loadData(_selectedRange.value)
                 }
