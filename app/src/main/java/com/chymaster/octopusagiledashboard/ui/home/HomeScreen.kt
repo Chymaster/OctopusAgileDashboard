@@ -35,6 +35,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.chymaster.octopusagiledashboard.ui.components.DemoModeBanner
 import com.chymaster.octopusagiledashboard.ui.components.ErrorState
 import com.chymaster.octopusagiledashboard.ui.components.LoadingState
 import com.chymaster.octopusagiledashboard.ui.home.components.FuelMixPieChart
@@ -45,6 +46,7 @@ import com.chymaster.octopusagiledashboard.ui.home.components.PriceTimelineChart
 @Composable
 fun HomeScreen(
     onOpenDrawer: () -> Unit,
+    onOpenSettings: () -> Unit = {},
     modifier: Modifier = Modifier,
     viewModel: HomeViewModel = hiltViewModel()
 ) {
@@ -103,18 +105,24 @@ fun HomeScreen(
                 )
             }
             else -> {
-                PullToRefreshBox(
-                    isRefreshing = uiState.isRefreshing,
-                    onRefresh = { viewModel.onRefresh() },
+                Column(
                     modifier = modifier
                         .fillMaxSize()
                         .padding(paddingValues)
                 ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(16.dp)
+                    if (uiState.isDemoMode) {
+                        DemoModeBanner(onOpenSettings = onOpenSettings)
+                    }
+                    PullToRefreshBox(
+                        isRefreshing = uiState.isRefreshing,
+                        onRefresh = { viewModel.onRefresh() },
+                        modifier = Modifier.fillMaxSize()
                     ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(16.dp)
+                        ) {
                         // Top section: Gauge (4) on left + GridMix (6) on right, side by side
                         Row(
                             modifier = Modifier
@@ -206,5 +214,6 @@ fun HomeScreen(
                 }
             }
         }
+    }
     }
 }
