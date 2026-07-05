@@ -23,6 +23,8 @@ This app is completely free with zero ads, zero analytics SDKs, and zero trackin
 **💻 Fully Open Source**
 The entire source code is publicly available and open for inspection. You can verify every permission, every network call, and every line of code. If you're a developer, contributions are welcome.
 
+🔗 github.com/Chymaster/OctopusAgileDashboard
+
 **⚡ Live Price Tracking**
 See the current Agile price at a glance on a colour-coded gauge that compares against the Flexible Octopus reference rate. Green means cheap, amber means moderate, red means expensive — so you can decide in an instant whether to run the dishwasher now or wait.
 
