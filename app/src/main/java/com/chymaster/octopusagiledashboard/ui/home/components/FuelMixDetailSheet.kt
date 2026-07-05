@@ -2,6 +2,7 @@ package com.chymaster.octopusagiledashboard.ui.home.components
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -26,7 +27,10 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -34,9 +38,12 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import kotlin.math.atan2
+import kotlin.math.sqrt
 import com.chymaster.octopusagiledashboard.core.util.DateTimeFormatters
 import com.chymaster.octopusagiledashboard.domain.model.FuelMix
 import com.chymaster.octopusagiledashboard.domain.model.GreenEnergyData
@@ -55,6 +62,7 @@ fun FuelMixDetailSheet(
     onDismiss: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var selectedFuel by remember { mutableStateOf<FuelMix?>(null) }
 
     val lowCarbonFuels = data.fuelMix
         .filter { it.fuel in LOW_CARBON_FUELS && it.percentage > 0.0 }
@@ -129,8 +137,11 @@ fun FuelMixDetailSheet(
             // Full multi-fuel donut. This is the "pie chart too" — it gives
             // the same per-fuel breakdown the Home screen used to render
             // before we simplified it, but with room for every slice.
+            // Tap a slice to see which fuel it represents.
             DetailedFuelMixPieChart(
                 fuelMix = data.fuelMix,
+                selectedFuel = selectedFuel,
+                onSliceSelected = { fuel -> selectedFuel = fuel },
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(200.dp)
@@ -204,17 +215,83 @@ private fun SummaryStat(
 @Composable
 private fun DetailedFuelMixPieChart(
     fuelMix: List<FuelMix>,
+    selectedFuel: FuelMix?,
+    onSliceSelected: (FuelMix?) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val colors = remember(fuelMix) {
         fuelMix.map { entry -> FUEL_COLORS[entry.fuel] ?: Color(0xFFBDBDBD) }
     }
 
+    // Pre-compute arc angles so the tap detector can identify which slice
+    // was hit without recomputing every time.
+    val arcRanges = remember(fuelMix) {
+        var startAngle = -90f
+        fuelMix.map { entry ->
+            val sweep = (entry.percentage / 100f * 360f).toFloat()
+            val range = startAngle to (startAngle + sweep)
+            startAngle += sweep
+            range
+        }
+    }
+
+    val labelText = selectedFuel?.let {
+        "${it.fuel.replaceFirstChar { c -> c.uppercase() }}  ${String.format(java.util.Locale.UK, "%.1f%%", it.percentage)}"
+    }
+
     Box(
         contentAlignment = Alignment.Center,
         modifier = modifier
     ) {
-        Canvas(modifier = Modifier.fillMaxSize()) {
+        Canvas(
+            modifier = Modifier
+                .fillMaxSize()
+                .pointerInput(fuelMix) {
+                    detectTapGestures { offset ->
+                        val strokeWidthPx = 30.dp.toPx()
+                        val minSide = minOf(size.width, size.height).toFloat()
+                        val diameter = minSide - strokeWidthPx
+                        val radius = diameter / 2f
+                        val center = Offset(size.width / 2f, size.height / 2f)
+
+                        // Distance from center of donut.
+                        val dx = offset.x - center.x
+                        val dy = offset.y - center.y
+                        val dist = sqrt(dx * dx + dy * dy)
+
+                        // Only register taps within the donut ring
+                        // (between inner and outer edge of the stroke).
+                        if (dist < radius - strokeWidthPx / 2f ||
+                            dist > radius + strokeWidthPx / 2f
+                        ) {
+                            onSliceSelected(null) // tapped outside the ring
+                            return@detectTapGestures
+                        }
+
+                        // Convert tap position to angle in degrees
+                        // (same coordinate system: -90° is 12 o'clock).
+                        val angle = Math.toDegrees(
+                            atan2(dy.toDouble(), dx.toDouble())
+                        ).toFloat()
+                        val normalisedAngle = if (angle < -90f) angle + 360f else angle
+
+                        // Find which slice this angle falls into.
+                        val tapped = fuelMix.indices.firstOrNull { i ->
+                            val (start, end) = arcRanges[i]
+                            normalisedAngle in start..end && fuelMix[i].percentage > 0.0
+                        }
+                        if (tapped != null) {
+                            // Toggle off if tapping the same slice again.
+                            onSliceSelected(
+                                if (fuelMix[tapped] == selectedFuel) null
+                                else fuelMix[tapped]
+                            )
+                        } else {
+                            onSliceSelected(null)
+                        }
+                    }
+                }
+        ) {
             val strokeWidth = 30.dp.toPx()
             val diameter = size.minDimension - strokeWidth
             val topLeft = Offset(
@@ -230,18 +307,44 @@ private fun DetailedFuelMixPieChart(
             for (i in fuelMix.indices) {
                 val sweepAngle = (fuelMix[i].percentage / 100f * 360f).toFloat()
                 if (sweepAngle > 0f) {
+                    val isSelected = fuelMix[i] == selectedFuel
                     drawArc(
-                        color = colors[i],
+                        color = colors[i].let { c ->
+                            if (selectedFuel != null && !isSelected) c.copy(alpha = 0.35f)
+                            else c
+                        },
                         startAngle = startAngle,
                         sweepAngle = sweepAngle,
                         useCenter = false,
                         topLeft = topLeft,
                         size = arcSize,
-                        style = Stroke(width = strokeWidth)
+                        style = Stroke(
+                            width = if (isSelected) strokeWidth + 4.dp.toPx()
+                            else strokeWidth
+                        )
                     )
                 }
                 startAngle += sweepAngle
             }
+        }
+
+        // Show fuel name in the centre when a slice is selected,
+        // otherwise fall back to the tap hint.
+        if (labelText != null) {
+            Text(
+                text = labelText,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = FUEL_COLORS[selectedFuel!!.fuel] ?: MaterialTheme.colorScheme.onSurface,
+                textAlign = TextAlign.Center
+            )
+        } else {
+            Text(
+                text = "Tap a slice",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center
+            )
         }
     }
 }
