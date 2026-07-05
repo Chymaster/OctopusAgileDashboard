@@ -15,6 +15,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -25,13 +26,13 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.chymaster.octopusagiledashboard.domain.model.FuelMix
+import com.chymaster.octopusagiledashboard.domain.model.LOW_CARBON_FUELS
 import com.chymaster.octopusagiledashboard.ui.theme.BrandColors
 
 /**
- * Per-fuel colors used by the detail sheet. The simplified pie chart on the
- * Home screen only uses [BrandColors.LowCarbonGreen] / [BrandColors.HighCarbon]
- * because the goal there is a glanceable two-way split; the sheet shows every
- * fuel in its own color.
+ * Per-fuel colors used by the nested donut on the Home screen and the
+ * detailed breakdown in the bottom sheet.
  */
 internal val FUEL_COLORS: Map<String, Color> = mapOf(
     "gas" to Color(0xFF78909C),
@@ -46,18 +47,31 @@ internal val FUEL_COLORS: Map<String, Color> = mapOf(
 )
 
 /**
- * Simplified grid-mix pie: two segments (low carbon vs high carbon) with a
- * centre percentage and a tappable surface that opens the detailed breakdown
- * in a sheet. Designed for the small card on the Home screen where the
- * full nine-fuel legend was being clipped.
+ * Nested grid-mix donut: an **inner ring** shows the two-way low/high carbon
+ * split and an **outer ring** breaks the mix down by individual fuel source.
+ * Low-carbon fuels in the outer ring are always grouped under the green
+ * section of the inner ring so the two layers read as one picture.
+ *
+ * Tapping anywhere opens the full detail sheet.
  */
 @Composable
 fun FuelMixPieChart(
     lowCarbonPercentage: Double,
+    fuelMix: List<FuelMix>,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val labelColor = MaterialTheme.colorScheme.onSurfaceVariant
+
+    // Order fuels so low-carbon sources come first (aligned under the inner
+    // ring's green segment) followed by high-carbon sources.
+    val orderedFuelMix = remember(fuelMix) {
+        val low = fuelMix.filter { it.fuel in LOW_CARBON_FUELS && it.percentage > 0.0 }
+            .sortedByDescending { it.percentage }
+        val high = fuelMix.filter { it.fuel !in LOW_CARBON_FUELS && it.percentage > 0.0 }
+            .sortedByDescending { it.percentage }
+        low + high
+    }
 
     Column(
         modifier = modifier.clickable(
@@ -78,21 +92,18 @@ fun FuelMixPieChart(
 
         Box(
             contentAlignment = Alignment.Center,
-            modifier = Modifier.size(120.dp)
+            modifier = Modifier.size(150.dp)
         ) {
             Canvas(modifier = Modifier.fillMaxSize()) {
-                val strokeWidth = 22.dp.toPx()
-                val diameter = size.minDimension - strokeWidth
-                val topLeft = Offset(
-                    (size.width - diameter) / 2f,
-                    (size.height - diameter) / 2f
+                // ── Inner ring: low carbon vs high carbon ──
+                val innerStroke = 22.dp.toPx()
+                val innerDiameter = size.minDimension - innerStroke
+                val innerTopLeft = Offset(
+                    (size.width - innerDiameter) / 2f,
+                    (size.height - innerDiameter) / 2f
                 )
-                val arcSize = Size(diameter, diameter)
+                val innerArcSize = Size(innerDiameter, innerDiameter)
 
-                // Two-segment donut: start at the top (-90°) and sweep
-                // low-carbon first, then high-carbon. We render the low-carbon
-                // arc and the high-carbon arc as two separate drawArc calls so
-                // the colours are explicit and the centre label is legible.
                 val lowSweep = (lowCarbonPercentage.coerceIn(0.0, 100.0) / 100f * 360f).toFloat()
                 val highSweep = ((100.0 - lowCarbonPercentage).coerceIn(0.0, 100.0) / 100f * 360f).toFloat()
 
@@ -102,9 +113,9 @@ fun FuelMixPieChart(
                         startAngle = -90f,
                         sweepAngle = lowSweep,
                         useCenter = false,
-                        topLeft = topLeft,
-                        size = arcSize,
-                        style = Stroke(width = strokeWidth)
+                        topLeft = innerTopLeft,
+                        size = innerArcSize,
+                        style = Stroke(width = innerStroke)
                     )
                 }
                 if (highSweep > 0f) {
@@ -113,17 +124,46 @@ fun FuelMixPieChart(
                         startAngle = -90f + lowSweep,
                         sweepAngle = highSweep,
                         useCenter = false,
-                        topLeft = topLeft,
-                        size = arcSize,
-                        style = Stroke(width = strokeWidth)
+                        topLeft = innerTopLeft,
+                        size = innerArcSize,
+                        style = Stroke(width = innerStroke)
                     )
+                }
+
+                // ── Outer ring: per-fuel breakdown ──
+                // Low-carbon fuels are listed first so their arcs sweep
+                // under the green section of the inner ring.
+                val outerStroke = 16.dp.toPx()
+                val outerDiameter = innerDiameter - innerStroke - outerStroke - 6.dp.toPx()
+                val outerTopLeft = Offset(
+                    (size.width - outerDiameter) / 2f,
+                    (size.height - outerDiameter) / 2f
+                )
+                val outerArcSize = Size(outerDiameter, outerDiameter)
+
+                var outerStartAngle = -90f
+                for (entry in orderedFuelMix) {
+                    val sweepAngle = (entry.percentage / 100f * 360f).toFloat()
+                    if (sweepAngle > 0f) {
+                        drawArc(
+                            color = FUEL_COLORS[entry.fuel] ?: Color(0xFFBDBDBD),
+                            startAngle = outerStartAngle,
+                            sweepAngle = sweepAngle,
+                            useCenter = false,
+                            topLeft = outerTopLeft,
+                            size = outerArcSize,
+                            style = Stroke(width = outerStroke)
+                        )
+                    }
+                    outerStartAngle += sweepAngle
                 }
             }
 
+            // Centre label: low-carbon percentage
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
                     text = String.format(java.util.Locale.UK, "%.0f%%", lowCarbonPercentage),
-                    style = MaterialTheme.typography.displaySmall,
+                    style = MaterialTheme.typography.headlineMedium,
                     fontWeight = FontWeight.Bold,
                     color = BrandColors.LowCarbonGreen,
                     textAlign = TextAlign.Center

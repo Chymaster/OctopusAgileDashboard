@@ -161,6 +161,7 @@ fun HomeScreen(
                                 uiState.greenEnergyData?.let { data ->
                                     FuelMixPieChart(
                                         lowCarbonPercentage = data.lowCarbonPercentage,
+                                        fuelMix = data.fuelMix,
                                         onClick = { showFuelMixSheet = true },
                                         modifier = Modifier
                                             .fillMaxSize()
