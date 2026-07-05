@@ -7,7 +7,7 @@
     <!-- Exclude plain DataStore preferences (MPAN, serial, cached prices) -->
     <exclude domain="sharedpref" path="octopus_preferences.preferences_pb" />
     <!-- Exclude Jetpack DataStore files -->
-    <exclude domain="data" path="datastore/octopus_preferences.preferences_pb" />
+    <exclude domain="file" path="datastore/octopus_preferences.preferences_pb" />
     <!-- Exclude Room database (cached prices, consumption) -->
     <exclude domain="database" path="octopus_database" />
     <exclude domain="database" path="octopus_database-shm" />

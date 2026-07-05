@@ -35,7 +35,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.chymaster.octopusagiledashboard.ui.components.DemoModeBanner
 import com.chymaster.octopusagiledashboard.ui.components.ErrorState
 import com.chymaster.octopusagiledashboard.ui.components.LoadingState
 import com.chymaster.octopusagiledashboard.ui.home.components.FuelMixPieChart
@@ -110,9 +109,6 @@ fun HomeScreen(
                         .fillMaxSize()
                         .padding(paddingValues)
                 ) {
-                    if (uiState.isDemoMode) {
-                        DemoModeBanner(onOpenSettings = onOpenSettings)
-                    }
                     PullToRefreshBox(
                         isRefreshing = uiState.isRefreshing,
                         onRefresh = { viewModel.onRefresh() },

@@ -45,6 +45,9 @@ private val FUEL_COLORS = mapOf(
     "other" to Color(0xFFBDBDBD)
 )
 
+/** Max legend items before we merge the smallest into "Other". */
+private const val MAX_LEGEND_ITEMS = 6
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun FuelMixPieChart(
@@ -75,10 +78,10 @@ fun FuelMixPieChart(
 
         Box(
             contentAlignment = Alignment.Center,
-            modifier = Modifier.size(160.dp)
+            modifier = Modifier.size(120.dp)
         ) {
             Canvas(modifier = Modifier.fillMaxSize()) {
-                val strokeWidth = 28.dp.toPx()
+                val strokeWidth = 22.dp.toPx()
                 val diameter = size.minDimension - strokeWidth
                 val topLeft = Offset(
                     (size.width - diameter) / 2f,
