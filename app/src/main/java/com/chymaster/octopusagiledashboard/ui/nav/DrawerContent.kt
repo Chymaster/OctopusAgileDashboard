@@ -9,7 +9,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -63,8 +63,8 @@ fun DrawerContent(
                     if (!hasCredentials) {
                         Spacer(modifier = Modifier.width(8.dp))
                         Icon(
-                            Icons.Default.Lock,
-                            contentDescription = "Requires setup",
+                            Icons.Default.Info,
+                            contentDescription = "Demo data",
                             modifier = Modifier.height(16.dp),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )

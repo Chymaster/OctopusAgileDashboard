@@ -33,7 +33,9 @@ data class HomeUiState(
     val flexiblePrice: Double? = null,
     val greenEnergyData: GreenEnergyData? = null,
     val cheapThresholdPercent: Int = 70,
-    val moderateThresholdPercent: Int = 120
+    val moderateThresholdPercent: Int = 120,
+    val hasCredentials: Boolean = false,
+    val isDemoMode: Boolean = false
 )
 
 @HiltViewModel
@@ -51,6 +53,11 @@ class HomeViewModel @Inject constructor(
     private var refreshJob: Job? = null
 
     init {
+        viewModelScope.launch {
+            preferencesRepository.hasCredentials.collect { hasCreds ->
+                _uiState.update { it.copy(hasCredentials = hasCreds, isDemoMode = !hasCreds) }
+            }
+        }
         refreshJob = loadAllData()
         startGreenEnergyRefreshLoop()
 

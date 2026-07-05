@@ -7,6 +7,7 @@ import com.chymaster.octopusagiledashboard.data.repository.OctopusRepository
 import com.chymaster.octopusagiledashboard.domain.model.DateRangeSelection
 import com.chymaster.octopusagiledashboard.domain.model.HalfHourPoint
 import com.chymaster.octopusagiledashboard.domain.model.StandingCharge
+import com.chymaster.octopusagiledashboard.core.util.DemoDataGenerator
 import com.chymaster.octopusagiledashboard.ui.chart.BinnedPoint
 import com.chymaster.octopusagiledashboard.ui.chart.trimMissingConsumption
 import com.chymaster.octopusagiledashboard.domain.model.TimeRangePreset
@@ -47,6 +48,7 @@ data class DashboardUiState(
     val error: String? = null,
     val selectedBinnedPoint: BinnedPoint? = null,
     val hasCredentials: Boolean = false,
+    val isDemoMode: Boolean = false,
     // Summary stats
     val totalCost: Double? = null,
     val usageCost: Double? = null,
@@ -182,11 +184,14 @@ class DashboardViewModel @Inject constructor(
     private fun loadData(range: DateRangeSelection): Job {
         return viewModelScope.launch {
             val (start, end) = getDateRange(range)
+            val hasCreds = _uiState.value.hasCredentials
+
             _uiState.update {
                 it.copy(
                     isLoading = it.points.isEmpty(),
                     error = null,
                     selectedRange = range,
+                    isDemoMode = !hasCreds,
                     // Show placeholder points immediately so the chart renders
                     // the time range even before data arrives.
                     displayChartPoints = it.chartPoints.ifEmpty {
@@ -195,62 +200,105 @@ class DashboardViewModel @Inject constructor(
                 )
             }
 
-            // Start observing Room cache immediately — shows cached data right away
-            launch {
-                getDashboardDataUseCase(start, end).collectLatest { points ->
-                    val prices = points.mapNotNull { it.priceIncVat }
-                    val usageCost = points.sumOf { it.costIncVat ?: 0.0 }
-                    val totalKwh = points.sumOf { it.consumptionKwh ?: 0.0 }
-                    // Usage-weighted average: usage cost / total usage
-                    val avgPrice = if (totalKwh > 0) usageCost / totalKwh else null
-
-                    val trimmed = points.trimMissingConsumption()
-                    // Always have chart points to show — use real data, or
-                    // generate placeholder points spanning the selected range
-                    // so the chart axis shows the full date range.
-                    val displayPoints = trimmed.ifEmpty {
-                        generatePlaceholderPoints(start, end)
-                    }
-
-                    _uiState.update {
-                        it.copy(
-                            isLoading = false,
-                            points = points,
-                            chartPoints = trimmed,
-                            displayChartPoints = displayPoints,
-                            error = null,
-                            usageCost = if (totalKwh > 0) usageCost else null,
-                            totalKwh = if (totalKwh > 0) totalKwh else null,
-                            avgPrice = avgPrice,
-                            minPrice = prices.minOrNull(),
-                            maxPrice = prices.maxOrNull()
-                        )
-                    }
-                    recomputeZoneBreakdown()
-                    // Recompute total cost with latest standing charge
-                    recalculateTotalCost(start, end)
-                }
-            }
-
-            // Observe standing charges and compute standing charge cost
-            launch {
-                repository.observeStandingCharges(start, end).collectLatest { charges ->
-                    _uiState.update { it.copy(standingChargeCost = computeStandingChargeCost(charges, start, end)) }
-                    recalculateTotalCost(start, end)
-                }
-            }
-
-            // Refresh from API in background — Room observation will auto-update when data arrives
-            val refreshResult = refreshDashboardDataUseCase(start, end)
-            if (refreshResult.isFailure && _uiState.value.points.isEmpty()) {
-                _uiState.update {
-                    it.copy(error = refreshResult.exceptionOrNull()?.message ?: "Failed to refresh")
-                }
+            if (hasCreds) {
+                loadRealData(start, end)
+            } else {
+                loadDemoData(start, end)
             }
         }
     }
 
-    private fun recalculateTotalCost(start: Instant, end: Instant) {
+    /** Real data path: observe Room cache + refresh from authenticated API. */
+    private suspend fun loadRealData(start: Instant, end: Instant) = coroutineScope {
+        // Start observing Room cache immediately — shows cached data right away
+        launch {
+            getDashboardDataUseCase(start, end).collectLatest { points ->
+                updateDashboardWithPoints(points, start, end)
+            }
+        }
+
+        // Observe standing charges and compute standing charge cost
+        launch {
+            repository.observeStandingCharges(start, end).collectLatest { charges ->
+                _uiState.update { it.copy(standingChargeCost = computeStandingChargeCost(charges, start, end)) }
+                recalculateTotalCost()
+            }
+        }
+
+        // Refresh from API in background — Room observation will auto-update when data arrives
+        val refreshResult = refreshDashboardDataUseCase(start, end)
+        if (refreshResult.isFailure && _uiState.value.points.isEmpty()) {
+            _uiState.update {
+                it.copy(error = refreshResult.exceptionOrNull()?.message ?: "Failed to refresh")
+            }
+        }
+    }
+
+    /** Demo data path: generate fake consumption, merge with real prices from public API. */
+    private suspend fun loadDemoData(start: Instant, end: Instant) = coroutineScope {
+        val demoPoints = DemoDataGenerator.generate(start, end)
+
+        // Compute synthetic standing charge for demo mode
+        val days = ChronoUnit.DAYS.between(
+            start.atZone(londonZone).toLocalDate(),
+            end.atZone(londonZone).toLocalDate()
+        ).coerceAtLeast(1)
+        _uiState.update { it.copy(standingChargeCost = DemoDataGenerator.DEMO_STANDING_CHARGE_PENCE_PER_DAY * days) }
+        recalculateTotalCost()
+
+        // Observe real Agile prices (public API, no credentials needed) and merge
+        launch {
+            repository.observeAgilePrices(start, end).collectLatest { prices ->
+                val mergedPoints = DemoDataGenerator.mergeWithRealPrices(demoPoints, prices)
+                updateDashboardWithPoints(mergedPoints, start, end)
+            }
+        }
+
+        // Trigger a price refresh from the public API
+        launch {
+            repository.refreshAgilePrices(start, end)
+        }
+    }
+
+    /** Update dashboard UI state with the given [HalfHourPoint]s. */
+    private fun updateDashboardWithPoints(
+        points: List<HalfHourPoint>,
+        start: Instant,
+        end: Instant
+    ) {
+        val prices = points.mapNotNull { it.priceIncVat }
+        val usageCost = points.sumOf { it.costIncVat ?: 0.0 }
+        val totalKwh = points.sumOf { it.consumptionKwh ?: 0.0 }
+        // Usage-weighted average: usage cost / total usage
+        val avgPrice = if (totalKwh > 0) usageCost / totalKwh else null
+
+        val trimmed = points.trimMissingConsumption()
+        // Always have chart points to show — use real data, or
+        // generate placeholder points spanning the selected range
+        // so the chart axis shows the full date range.
+        val displayPoints = trimmed.ifEmpty {
+            generatePlaceholderPoints(start, end)
+        }
+
+        _uiState.update {
+            it.copy(
+                isLoading = false,
+                points = points,
+                chartPoints = trimmed,
+                displayChartPoints = displayPoints,
+                error = null,
+                usageCost = if (totalKwh > 0) usageCost else null,
+                totalKwh = if (totalKwh > 0) totalKwh else null,
+                avgPrice = avgPrice,
+                minPrice = prices.minOrNull(),
+                maxPrice = prices.maxOrNull()
+            )
+        }
+        recomputeZoneBreakdown()
+        recalculateTotalCost()
+    }
+
+    private fun recalculateTotalCost() {
         val state = _uiState.value
         val usage = state.usageCost
         val standing = state.standingChargeCost
