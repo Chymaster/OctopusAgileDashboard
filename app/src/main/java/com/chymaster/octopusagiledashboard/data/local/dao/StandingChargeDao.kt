@@ -18,4 +18,7 @@ interface StandingChargeDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(items: List<StandingChargeEntity>)
+
+    @Query("DELETE FROM standing_charges")
+    suspend fun deleteAll()
 }

@@ -40,9 +40,13 @@ class GreenEnergyRepositoryImpl @Inject constructor(
                     val lowCarbonPerc = fuelMix
                         .filter { it.fuel in LOW_CARBON_FUELS }
                         .sumOf { it.percentage }
+                    val highCarbonPerc = fuelMix
+                        .filter { it.fuel !in LOW_CARBON_FUELS }
+                        .sumOf { it.percentage }
 
                     val data = GreenEnergyData(
                         lowCarbonPercentage = lowCarbonPerc,
+                        highCarbonPercentage = highCarbonPerc,
                         fuelMix = fuelMix,
                         fetchedAt = Instant.now()
                     )

@@ -30,13 +30,16 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.chymaster.octopusagiledashboard.ui.components.ErrorState
 import com.chymaster.octopusagiledashboard.ui.components.LoadingState
+import com.chymaster.octopusagiledashboard.ui.home.components.FuelMixDetailSheet
 import com.chymaster.octopusagiledashboard.ui.home.components.FuelMixPieChart
 import com.chymaster.octopusagiledashboard.ui.home.components.PriceGauge
 import com.chymaster.octopusagiledashboard.ui.home.components.PriceTimelineChart
@@ -45,11 +48,15 @@ import com.chymaster.octopusagiledashboard.ui.home.components.PriceTimelineChart
 @Composable
 fun HomeScreen(
     onOpenDrawer: () -> Unit,
+    onOpenSettings: () -> Unit = {},
     modifier: Modifier = Modifier,
     viewModel: HomeViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
+    // Sheet opens when the user taps the grid-mix pie. Held in the screen so
+    // the dismissal is owned at the same level as the chart card.
+    var showFuelMixSheet by remember { mutableStateOf(false) }
 
     LaunchedEffect(uiState.error) {
         uiState.error?.let {
@@ -103,18 +110,21 @@ fun HomeScreen(
                 )
             }
             else -> {
-                PullToRefreshBox(
-                    isRefreshing = uiState.isRefreshing,
-                    onRefresh = { viewModel.onRefresh() },
+                Column(
                     modifier = modifier
                         .fillMaxSize()
                         .padding(paddingValues)
                 ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(16.dp)
+                    PullToRefreshBox(
+                        isRefreshing = uiState.isRefreshing,
+                        onRefresh = { viewModel.onRefresh() },
+                        modifier = Modifier.fillMaxSize()
                     ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(16.dp)
+                        ) {
                         // Top section: Gauge (4) on left + GridMix (6) on right, side by side
                         Row(
                             modifier = Modifier
@@ -150,8 +160,9 @@ fun HomeScreen(
                             ) {
                                 uiState.greenEnergyData?.let { data ->
                                     FuelMixPieChart(
-                                        fuelMix = data.fuelMix,
                                         lowCarbonPercentage = data.lowCarbonPercentage,
+                                        fuelMix = data.fuelMix,
+                                        onClick = { showFuelMixSheet = true },
                                         modifier = Modifier
                                             .fillMaxSize()
                                             .padding(12.dp)
@@ -205,6 +216,19 @@ fun HomeScreen(
                     }
                 }
             }
+        }
+    }
+    }
+
+    // Detail sheet for the grid-mix pie. Renders above the Scaffold so it
+    // gets the ModalBottomSheet's full-screen scrim rather than being clipped
+    // by the screen content.
+    uiState.greenEnergyData?.let { data ->
+        if (showFuelMixSheet) {
+            FuelMixDetailSheet(
+                data = data,
+                onDismiss = { showFuelMixSheet = false }
+            )
         }
     }
 }
