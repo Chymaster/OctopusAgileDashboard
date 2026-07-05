@@ -23,6 +23,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -90,27 +91,31 @@ class DashboardViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
-            // Track credential state, and on a flip (demo↔real) wipe BOTH
-            // caches and reload so the chart switches sources without a flash
-            // of stale data. The local Room cache is purged on every flip:
-            //  - demo → real: rows tagged with the demo tariff code linger in
-            //    Room from the public-API refresh in demo mode; without a
-            //    wipe they would briefly appear on the real Dashboard.
-            //  - real → demo: the previous user's prices and consumption
-            //    would otherwise flash on the freshly-minted demo chart.
-            // The in-memory demo store is also cleared, since the new path
-            // will re-seed it (demo) or no longer use it (real).
+            // Track credential state. On every change (including the first
+            // emission when the ViewModel starts), update the UI flag. On a
+            // flip (demo↔real) wipe BOTH caches so the chart switches
+            // sources without a flash of stale data, then reload.
             var prev: Boolean? = null
             preferencesRepository.hasCredentials.collect { hasCreds ->
                 val flipped = prev != null && prev != hasCreds
                 if (flipped) {
+                    // Purge both caches on a mode switch:
+                    //  - demo → real: rows tagged with the demo tariff code
+                    //    linger in Room from the public-API refresh; without a
+                    //    wipe they briefly appear on the real Dashboard.
+                    //  - real → demo: the previous user's prices and
+                    //    consumption would flash on the demo chart.
                     demoCacheStore.clearAll()
                     repository.purgeAllUserData()
-                    dataJob?.cancel()
-                    dataJob = loadData(_selectedRange.value)
                 }
                 prev = hasCreds
                 _uiState.update { it.copy(hasCredentials = hasCreds) }
+                // Always reload: handles both the initial load (first
+                // emission) and mode switches (flipped). The cancelled job
+                // is fine — loadData reads hasCredentials from _uiState
+                // which is already updated above.
+                dataJob?.cancel()
+                dataJob = loadData(_selectedRange.value)
             }
         }
         viewModelScope.launch {
@@ -134,9 +139,12 @@ class DashboardViewModel @Inject constructor(
                 recomputeZoneBreakdown()
             }
         }
+        // Skip the initial emission — the hasCredentials collector above
+        // handles the first loadData. Only react to actual range changes.
         viewModelScope.launch {
-            _selectedRange.collectLatest { range ->
-                loadData(range)
+            _selectedRange.drop(1).collectLatest { range ->
+                dataJob?.cancel()
+                dataJob = loadData(range)
             }
         }
     }
