@@ -63,7 +63,7 @@ import com.patrykandpatrick.vico.compose.common.data.ExtraStore
  * and usage (line, RIGHT Y axis in kWh) on a shared time axis.
  *
  * Price bars are ratio-coloured against [referencePrice] (the Flexible Octopus
- * tariff): green if < 70 %, amber if 70–120 %, red if > 120 %. When
+ * tariff): green if < 70 %, amber if 70–130 %, red if > 130 %. When
  * [referencePrice] is null the bars fall back to amber.
  */
 @Composable

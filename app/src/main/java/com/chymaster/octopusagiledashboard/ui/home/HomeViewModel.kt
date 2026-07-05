@@ -33,7 +33,7 @@ data class HomeUiState(
     val flexiblePrice: Double? = null,
     val greenEnergyData: GreenEnergyData? = null,
     val cheapThresholdPercent: Int = 70,
-    val moderateThresholdPercent: Int = 120,
+    val moderateThresholdPercent: Int = 130,
     val hasCredentials: Boolean = false,
     val isDemoMode: Boolean = false
 )
