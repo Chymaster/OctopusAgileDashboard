@@ -21,4 +21,7 @@ interface ConsumptionDao {
 
     @Query("DELETE FROM consumption WHERE intervalEnd < :cutoffMillis")
     suspend fun purgeOlderThan(cutoffMillis: Long)
+
+    @Query("DELETE FROM consumption")
+    suspend fun deleteAll()
 }

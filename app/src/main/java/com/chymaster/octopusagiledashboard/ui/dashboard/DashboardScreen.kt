@@ -2,21 +2,16 @@ package com.chymaster.octopusagiledashboard.ui.dashboard
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -28,7 +23,6 @@ import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
@@ -38,7 +32,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -48,6 +41,7 @@ import com.chymaster.octopusagiledashboard.ui.chart.ChartMode
 import com.chymaster.octopusagiledashboard.ui.chart.PriceLineChart
 import com.chymaster.octopusagiledashboard.ui.chart.PriceUsageChart
 import com.chymaster.octopusagiledashboard.ui.components.CustomDatePickerDialog
+import com.chymaster.octopusagiledashboard.ui.components.DemoModeBanner
 import com.chymaster.octopusagiledashboard.ui.components.ErrorState
 import com.chymaster.octopusagiledashboard.ui.components.LoadingState
 import com.chymaster.octopusagiledashboard.ui.components.PriceRangeCards
@@ -123,39 +117,9 @@ fun DashboardScreen(
                 onCustomRangeClick = { showDatePicker = true }
             )
 
-            // Setup prompt when credentials are not configured
-            if (!uiState.hasCredentials) {
-                Card(
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.primaryContainer
-                    ),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 8.dp)
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "Set up your Octopus Energy account to see consumption data",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer,
-                            modifier = Modifier.weight(1f)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        TextButton(
-                            onClick = onOpenSettings,
-                            colors = ButtonDefaults.textButtonColors(
-                                contentColor = MaterialTheme.colorScheme.primary
-                            )
-                        ) {
-                            Text("Settings")
-                        }
-                    }
-                }
+            // Demo mode banner when credentials are not configured
+            if (uiState.isDemoMode) {
+                DemoModeBanner(onOpenSettings = onOpenSettings)
             }
 
             Spacer(modifier = Modifier.height(8.dp))

@@ -2,6 +2,7 @@ package com.chymaster.octopusagiledashboard.ui.dashboard
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.chymaster.octopusagiledashboard.data.local.DemoCacheStore
 import com.chymaster.octopusagiledashboard.data.prefs.UserPreferencesRepository
 import com.chymaster.octopusagiledashboard.data.repository.OctopusRepository
 import com.chymaster.octopusagiledashboard.domain.model.DateRangeSelection
@@ -47,6 +48,7 @@ data class DashboardUiState(
     val error: String? = null,
     val selectedBinnedPoint: BinnedPoint? = null,
     val hasCredentials: Boolean = false,
+    val isDemoMode: Boolean = false,
     // Summary stats
     val totalCost: Double? = null,
     val usageCost: Double? = null,
@@ -71,7 +73,8 @@ class DashboardViewModel @Inject constructor(
     private val getDashboardDataUseCase: GetDashboardDataUseCase,
     private val refreshDashboardDataUseCase: RefreshDashboardDataUseCase,
     private val repository: OctopusRepository,
-    private val preferencesRepository: UserPreferencesRepository
+    private val preferencesRepository: UserPreferencesRepository,
+    private val demoCacheStore: DemoCacheStore
 ) : ViewModel() {
 
     private val londonZone = ZoneId.of("Europe/London")
@@ -87,7 +90,26 @@ class DashboardViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
+            // Track credential state, and on a flip (demo↔real) wipe BOTH
+            // caches and reload so the chart switches sources without a flash
+            // of stale data. The local Room cache is purged on every flip:
+            //  - demo → real: rows tagged with the demo tariff code linger in
+            //    Room from the public-API refresh in demo mode; without a
+            //    wipe they would briefly appear on the real Dashboard.
+            //  - real → demo: the previous user's prices and consumption
+            //    would otherwise flash on the freshly-minted demo chart.
+            // The in-memory demo store is also cleared, since the new path
+            // will re-seed it (demo) or no longer use it (real).
+            var prev: Boolean? = null
             preferencesRepository.hasCredentials.collect { hasCreds ->
+                val flipped = prev != null && prev != hasCreds
+                if (flipped) {
+                    demoCacheStore.clearAll()
+                    repository.purgeAllUserData()
+                    dataJob?.cancel()
+                    dataJob = loadData(_selectedRange.value)
+                }
+                prev = hasCreds
                 _uiState.update { it.copy(hasCredentials = hasCreds) }
             }
         }
@@ -179,14 +201,38 @@ class DashboardViewModel @Inject constructor(
         private const val FLEXIBLE_CACHE_TTL_MS = 30L * 24 * 60 * 60 * 1000
     }
 
+    /**
+     * Single, source-agnostic load path. The repository branches on
+     * `hasCredentials` internally, so this function:
+     *
+     *  1. Seeds the in-memory [DemoCacheStore] when no credentials are
+     *     configured, so the first observation emission is a fully populated
+     *     list (this is what eliminates the flicker).
+     *  2. Starts the dashboard flow (which reads from the demo store or Room
+     *     depending on credential state) and the standing-charge flow.
+     *  3. Triggers a refresh in the background — the public Agile API in
+     *     demo mode, the authenticated API in real mode.
+     */
     private fun loadData(range: DateRangeSelection): Job {
         return viewModelScope.launch {
             val (start, end) = getDateRange(range)
+            val hasCreds = _uiState.value.hasCredentials
+
+            // Seed the demo store BEFORE observing so the first emission
+            // is non-empty. In real mode this branch is skipped — the
+            // repository reads from Room, which is the source of truth.
+            if (!hasCreds) {
+                demoCacheStore.seedConsumption(start, end)
+                demoCacheStore.seedPrices(start, end)
+                demoCacheStore.seedStandingCharge()
+            }
+
             _uiState.update {
                 it.copy(
                     isLoading = it.points.isEmpty(),
                     error = null,
                     selectedRange = range,
+                    isDemoMode = !hasCreds,
                     // Show placeholder points immediately so the chart renders
                     // the time range even before data arrives.
                     displayChartPoints = it.chartPoints.ifEmpty {
@@ -195,62 +241,78 @@ class DashboardViewModel @Inject constructor(
                 )
             }
 
-            // Start observing Room cache immediately — shows cached data right away
-            launch {
-                getDashboardDataUseCase(start, end).collectLatest { points ->
-                    val prices = points.mapNotNull { it.priceIncVat }
-                    val usageCost = points.sumOf { it.costIncVat ?: 0.0 }
-                    val totalKwh = points.sumOf { it.consumptionKwh ?: 0.0 }
-                    // Usage-weighted average: usage cost / total usage
-                    val avgPrice = if (totalKwh > 0) usageCost / totalKwh else null
-
-                    val trimmed = points.trimMissingConsumption()
-                    // Always have chart points to show — use real data, or
-                    // generate placeholder points spanning the selected range
-                    // so the chart axis shows the full date range.
-                    val displayPoints = trimmed.ifEmpty {
-                        generatePlaceholderPoints(start, end)
+            coroutineScope {
+                // Observe the dashboard flow. The repository branches
+                // internally on hasCredentials: demo → DemoCacheStore, real → Room.
+                launch {
+                    getDashboardDataUseCase(start, end).collectLatest { points ->
+                        updateDashboardWithPoints(points, start, end)
                     }
+                }
 
+                // Observe standing charges and compute the standing charge cost.
+                // The repository returns the synthetic demo entity when in
+                // demo mode, so this code is identical for both paths.
+                launch {
+                    repository.observeStandingCharges(start, end).collectLatest { charges ->
+                        _uiState.update { it.copy(standingChargeCost = computeStandingChargeCost(charges, start, end)) }
+                        recalculateTotalCost()
+                    }
+                }
+
+                // Refresh in the background. The observation flows will
+                // auto-update when the refresh writes to the demo store or
+                // Room. In demo mode the seeded data stays visible even if
+                // the public API refresh fails.
+                val refreshResult = refreshDashboardDataUseCase(start, end)
+                if (refreshResult.isFailure && _uiState.value.points.isEmpty()) {
                     _uiState.update {
-                        it.copy(
-                            isLoading = false,
-                            points = points,
-                            chartPoints = trimmed,
-                            displayChartPoints = displayPoints,
-                            error = null,
-                            usageCost = if (totalKwh > 0) usageCost else null,
-                            totalKwh = if (totalKwh > 0) totalKwh else null,
-                            avgPrice = avgPrice,
-                            minPrice = prices.minOrNull(),
-                            maxPrice = prices.maxOrNull()
-                        )
+                        it.copy(error = refreshResult.exceptionOrNull()?.message ?: "Failed to refresh")
                     }
-                    recomputeZoneBreakdown()
-                    // Recompute total cost with latest standing charge
-                    recalculateTotalCost(start, end)
-                }
-            }
-
-            // Observe standing charges and compute standing charge cost
-            launch {
-                repository.observeStandingCharges(start, end).collectLatest { charges ->
-                    _uiState.update { it.copy(standingChargeCost = computeStandingChargeCost(charges, start, end)) }
-                    recalculateTotalCost(start, end)
-                }
-            }
-
-            // Refresh from API in background — Room observation will auto-update when data arrives
-            val refreshResult = refreshDashboardDataUseCase(start, end)
-            if (refreshResult.isFailure && _uiState.value.points.isEmpty()) {
-                _uiState.update {
-                    it.copy(error = refreshResult.exceptionOrNull()?.message ?: "Failed to refresh")
                 }
             }
         }
     }
 
-    private fun recalculateTotalCost(start: Instant, end: Instant) {
+    /** Update dashboard UI state with the given [HalfHourPoint]s. */
+    private fun updateDashboardWithPoints(
+        points: List<HalfHourPoint>,
+        start: Instant,
+        end: Instant
+    ) {
+        val prices = points.mapNotNull { it.priceIncVat }
+        val usageCost = points.sumOf { it.costIncVat ?: 0.0 }
+        val totalKwh = points.sumOf { it.consumptionKwh ?: 0.0 }
+        // Usage-weighted average: usage cost / total usage
+        val avgPrice = if (totalKwh > 0) usageCost / totalKwh else null
+
+        val trimmed = points.trimMissingConsumption()
+        // Always have chart points to show — use real data, or
+        // generate placeholder points spanning the selected range
+        // so the chart axis shows the full date range.
+        val displayPoints = trimmed.ifEmpty {
+            generatePlaceholderPoints(start, end)
+        }
+
+        _uiState.update {
+            it.copy(
+                isLoading = false,
+                points = points,
+                chartPoints = trimmed,
+                displayChartPoints = displayPoints,
+                error = null,
+                usageCost = if (totalKwh > 0) usageCost else null,
+                totalKwh = if (totalKwh > 0) totalKwh else null,
+                avgPrice = avgPrice,
+                minPrice = prices.minOrNull(),
+                maxPrice = prices.maxOrNull()
+            )
+        }
+        recomputeZoneBreakdown()
+        recalculateTotalCost()
+    }
+
+    private fun recalculateTotalCost() {
         val state = _uiState.value
         val usage = state.usageCost
         val standing = state.standingChargeCost
@@ -291,7 +353,8 @@ class DashboardViewModel @Inject constructor(
     /**
      * Compute the total standing charge cost (in pence) for the given date range.
      * Standing charges are in pence per day; we find the applicable charge and
-     * multiply by the number of calendar days covered.
+     * multiply by the number of calendar days covered. Works for both real
+     * (50p/day from the API) and demo (50p/day from the synthetic entity) data.
      */
     private fun computeStandingChargeCost(
         charges: List<StandingCharge>,

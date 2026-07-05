@@ -4,6 +4,7 @@ import java.time.Instant
 
 data class GreenEnergyData(
     val lowCarbonPercentage: Double,
+    val highCarbonPercentage: Double = 0.0,
     val fuelMix: List<FuelMix>,
     val fetchedAt: Instant
 )
