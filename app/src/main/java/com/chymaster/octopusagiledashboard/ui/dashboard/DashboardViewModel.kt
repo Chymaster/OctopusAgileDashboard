@@ -2,12 +2,12 @@ package com.chymaster.octopusagiledashboard.ui.dashboard
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.chymaster.octopusagiledashboard.data.local.DemoCacheStore
 import com.chymaster.octopusagiledashboard.data.prefs.UserPreferencesRepository
 import com.chymaster.octopusagiledashboard.data.repository.OctopusRepository
 import com.chymaster.octopusagiledashboard.domain.model.DateRangeSelection
 import com.chymaster.octopusagiledashboard.domain.model.HalfHourPoint
 import com.chymaster.octopusagiledashboard.domain.model.StandingCharge
-import com.chymaster.octopusagiledashboard.core.util.DemoDataGenerator
 import com.chymaster.octopusagiledashboard.ui.chart.BinnedPoint
 import com.chymaster.octopusagiledashboard.ui.chart.trimMissingConsumption
 import com.chymaster.octopusagiledashboard.domain.model.TimeRangePreset
@@ -73,7 +73,8 @@ class DashboardViewModel @Inject constructor(
     private val getDashboardDataUseCase: GetDashboardDataUseCase,
     private val refreshDashboardDataUseCase: RefreshDashboardDataUseCase,
     private val repository: OctopusRepository,
-    private val preferencesRepository: UserPreferencesRepository
+    private val preferencesRepository: UserPreferencesRepository,
+    private val demoCacheStore: DemoCacheStore
 ) : ViewModel() {
 
     private val londonZone = ZoneId.of("Europe/London")
@@ -89,7 +90,25 @@ class DashboardViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
+            // Track credential state, and on a flip (demo↔real) reset the
+            // relevant cache and reload so the chart switches sources without
+            // a flash of stale data. On demo → real, the in-memory demo store
+            // is cleared. On real → demo, the local Room cache is purged so
+            // the previous user's prices and consumption do not show through
+            // on the freshly-minted demo chart.
+            var prev: Boolean? = null
             preferencesRepository.hasCredentials.collect { hasCreds ->
+                val flipped = prev != null && prev != hasCreds
+                if (flipped) {
+                    if (hasCreds) {
+                        demoCacheStore.clearAll()
+                    } else {
+                        repository.purgeAllUserData()
+                    }
+                    dataJob?.cancel()
+                    dataJob = loadData(_selectedRange.value)
+                }
+                prev = hasCreds
                 _uiState.update { it.copy(hasCredentials = hasCreds) }
             }
         }
@@ -181,10 +200,31 @@ class DashboardViewModel @Inject constructor(
         private const val FLEXIBLE_CACHE_TTL_MS = 30L * 24 * 60 * 60 * 1000
     }
 
+    /**
+     * Single, source-agnostic load path. The repository branches on
+     * `hasCredentials` internally, so this function:
+     *
+     *  1. Seeds the in-memory [DemoCacheStore] when no credentials are
+     *     configured, so the first observation emission is a fully populated
+     *     list (this is what eliminates the flicker).
+     *  2. Starts the dashboard flow (which reads from the demo store or Room
+     *     depending on credential state) and the standing-charge flow.
+     *  3. Triggers a refresh in the background — the public Agile API in
+     *     demo mode, the authenticated API in real mode.
+     */
     private fun loadData(range: DateRangeSelection): Job {
         return viewModelScope.launch {
             val (start, end) = getDateRange(range)
             val hasCreds = _uiState.value.hasCredentials
+
+            // Seed the demo store BEFORE observing so the first emission
+            // is non-empty. In real mode this branch is skipped — the
+            // repository reads from Room, which is the source of truth.
+            if (!hasCreds) {
+                demoCacheStore.seedConsumption(start, end)
+                demoCacheStore.seedPrices(start, end)
+                demoCacheStore.seedStandingCharge()
+            }
 
             _uiState.update {
                 it.copy(
@@ -200,63 +240,36 @@ class DashboardViewModel @Inject constructor(
                 )
             }
 
-            if (hasCreds) {
-                loadRealData(start, end)
-            } else {
-                loadDemoData(start, end)
+            coroutineScope {
+                // Observe the dashboard flow. The repository branches
+                // internally on hasCredentials: demo → DemoCacheStore, real → Room.
+                launch {
+                    getDashboardDataUseCase(start, end).collectLatest { points ->
+                        updateDashboardWithPoints(points, start, end)
+                    }
+                }
+
+                // Observe standing charges and compute the standing charge cost.
+                // The repository returns the synthetic demo entity when in
+                // demo mode, so this code is identical for both paths.
+                launch {
+                    repository.observeStandingCharges(start, end).collectLatest { charges ->
+                        _uiState.update { it.copy(standingChargeCost = computeStandingChargeCost(charges, start, end)) }
+                        recalculateTotalCost()
+                    }
+                }
+
+                // Refresh in the background. The observation flows will
+                // auto-update when the refresh writes to the demo store or
+                // Room. In demo mode the seeded data stays visible even if
+                // the public API refresh fails.
+                val refreshResult = refreshDashboardDataUseCase(start, end)
+                if (refreshResult.isFailure && _uiState.value.points.isEmpty()) {
+                    _uiState.update {
+                        it.copy(error = refreshResult.exceptionOrNull()?.message ?: "Failed to refresh")
+                    }
+                }
             }
-        }
-    }
-
-    /** Real data path: observe Room cache + refresh from authenticated API. */
-    private suspend fun loadRealData(start: Instant, end: Instant) = coroutineScope {
-        // Start observing Room cache immediately — shows cached data right away
-        launch {
-            getDashboardDataUseCase(start, end).collectLatest { points ->
-                updateDashboardWithPoints(points, start, end)
-            }
-        }
-
-        // Observe standing charges and compute standing charge cost
-        launch {
-            repository.observeStandingCharges(start, end).collectLatest { charges ->
-                _uiState.update { it.copy(standingChargeCost = computeStandingChargeCost(charges, start, end)) }
-                recalculateTotalCost()
-            }
-        }
-
-        // Refresh from API in background — Room observation will auto-update when data arrives
-        val refreshResult = refreshDashboardDataUseCase(start, end)
-        if (refreshResult.isFailure && _uiState.value.points.isEmpty()) {
-            _uiState.update {
-                it.copy(error = refreshResult.exceptionOrNull()?.message ?: "Failed to refresh")
-            }
-        }
-    }
-
-    /** Demo data path: generate fake consumption, merge with real prices from public API. */
-    private suspend fun loadDemoData(start: Instant, end: Instant) = coroutineScope {
-        val demoPoints = DemoDataGenerator.generate(start, end)
-
-        // Compute synthetic standing charge for demo mode
-        val days = ChronoUnit.DAYS.between(
-            start.atZone(londonZone).toLocalDate(),
-            end.atZone(londonZone).toLocalDate()
-        ).coerceAtLeast(1)
-        _uiState.update { it.copy(standingChargeCost = DemoDataGenerator.DEMO_STANDING_CHARGE_PENCE_PER_DAY * days) }
-        recalculateTotalCost()
-
-        // Observe real Agile prices (public API, no credentials needed) and merge
-        launch {
-            repository.observeAgilePrices(start, end).collectLatest { prices ->
-                val mergedPoints = DemoDataGenerator.mergeWithRealPrices(demoPoints, prices)
-                updateDashboardWithPoints(mergedPoints, start, end)
-            }
-        }
-
-        // Trigger a price refresh from the public API
-        launch {
-            repository.refreshAgilePrices(start, end)
         }
     }
 
@@ -339,7 +352,8 @@ class DashboardViewModel @Inject constructor(
     /**
      * Compute the total standing charge cost (in pence) for the given date range.
      * Standing charges are in pence per day; we find the applicable charge and
-     * multiply by the number of calendar days covered.
+     * multiply by the number of calendar days covered. Works for both real
+     * (50p/day from the API) and demo (50p/day from the synthetic entity) data.
      */
     private fun computeStandingChargeCost(
         charges: List<StandingCharge>,
