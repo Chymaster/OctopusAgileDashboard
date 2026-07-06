@@ -70,25 +70,21 @@ This ensures no stale data from the previous mode flashes on screen.
 
 ## Data Source Branching: What Changes at the Cache Layer?
 
-Cache stores are **not reactive** to mode changes. Each method checks `preferencesRepository.isDemoMode.first()` at call time (point-in-time read, not a subscription).
+Cache stores are **not reactive** to mode changes. Each method checks `preferencesRepository.isDemoMode.first()` at call time (point-in-time read, not a subscription). **Only consumption branches on demo mode** — prices and standing charges always use the real API.
 
 ### Agile Prices (`OctopusRepositoryImpl`, managed inline)
 
+Agile prices have **no demo mode branching** — they always use the real Octopus public API (unauthenticated). Default tariff config (`AGILE-24-10-01` + GSP `_L`) is used when no credentials are set.
+
 ```
 loadAgilePrices(start, end):
-  isDemo? ──yes──→ DemoDataGenerator.generateAgilePriceEntities(start, end)
-              │     → write to Room → mergeAndEmitAgilePrices()
-              │
-              no──→ read from Room
-                    → if empty, fetch from Octopus public API (no auth needed)
-                    → mergeAndEmitAgilePrices()
+  read from Room
+    → if empty, fetch from Octopus public API
+    → mergeAndEmitAgilePrices()
 
 refreshAgilePrices(start, end):
-  isDemo? ──yes──→ DemoDataGenerator.generateAgilePriceEntities(start, end)   ← NO API CALL
-              │     → write to Room → mergeAndEmitAgilePrices()
-              │
-              no──→ fetch from Octopus public API → write to Room
-                    → read from Room → mergeAndEmitAgilePrices()
+  fetch from Octopus public API → write to Room
+    → read from Room → mergeAndEmitAgilePrices()
 ```
 
 ### ConsumptionCacheStore (`data/local/ConsumptionCacheStore.kt:78+`)
@@ -133,7 +129,7 @@ Always uses the real Octopus public API — **no demo mode branching**. Standing
 
 ## Reverse: Real → Demo (Clearing Credentials)
 
-Clearing credentials (deleting API key, MPAN, or serial) causes `hasCredentials` to emit `false`, `isDemoMode` to emit `true`. The same reactive chain fires — DashboardViewModel reloads, cache stores switch back to `DemoDataGenerator`.
+Clearing credentials (deleting API key, MPAN, or serial) causes `hasCredentials` to emit `false`, `isDemoMode` to emit `true`. The same reactive chain fires — DashboardViewModel reloads, the consumption cache store switches back to `DemoDataGenerator`, while prices continue to be fetched from the real API.
 
 ---
 
@@ -147,4 +143,4 @@ Clearing credentials (deleting API key, MPAN, or serial) causes `hasCredentials`
 
 4. **HomeViewModel does NOT reload on mode switch**: Only DashboardViewModel cancels and restarts. HomeViewModel relies on its initial `loadAllData()` from init and manual `onRefresh()`.
 
-5. **DemoDataGenerator is deterministic**: Synthetic data is seeded by epoch-second, so the same instant always produces the same data. Sentinel identifiers (`DEMO_MPAN`, `DEMO_SERIAL`, `DEMO_TARIFF`) tag demo entities.
+5. **DemoDataGenerator is deterministic**: Synthetic consumption data is seeded by epoch-second, so the same instant always produces the same data. Sentinel identifiers (`DEMO_MPAN`, `DEMO_SERIAL`) tag demo entities. Prices are always from the real API — only consumption is synthetic.
