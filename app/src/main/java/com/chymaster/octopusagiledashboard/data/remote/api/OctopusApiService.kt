@@ -34,6 +34,11 @@ interface OctopusApiService {
         @Query("period_to") periodTo: String? = null
     ): Response<PaginatedResponse<StandingChargeDto>>
 
+    @GET
+    suspend fun getStandingChargesByUrl(
+        @Url url: String
+    ): Response<PaginatedResponse<StandingChargeDto>>
+
     @GET("electricity-meter-points/{mpan}/")
     suspend fun getMeterPoint(
         @Path("mpan") mpan: String

@@ -89,12 +89,11 @@ class DashboardViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
-            preferencesRepository.hasCredentials.collect { hasCreds ->
-                _uiState.update { it.copy(hasCredentials = hasCreds, isDemoMode = !hasCreds) }
+            preferencesRepository.isDemoMode.collect { isDemo ->
+                _uiState.update { it.copy(hasCredentials = !isDemo, isDemoMode = isDemo) }
                 // Cache wipe is handled by the repository (via
                 // UserPreferencesRepository.saveCredentials) and the
-                // observe* methods use transformLatest to react to
-                // credential changes automatically.
+                // observe* methods react to credential changes automatically.
                 dataJob?.cancel()
                 dataJob = loadData(_selectedRange.value)
             }
@@ -191,23 +190,17 @@ class DashboardViewModel @Inject constructor(
     }
 
     /**
-     * Single, source-agnostic load path. The repository branches on
-     * `hasCredentials` internally, so this function:
+     * Single, source-agnostic load path. The unified cache stores handle
+     * demo/real branching internally, so this function:
      *
-     *  1. Seeds the in-memory [DemoCacheStore] when no credentials are
-     *     configured, so the first observation emission is a fully populated
-     *     list (this is what eliminates the flicker).
-     *  2. Starts the dashboard flow (which reads from the demo store or Room
-     *     depending on credential state) and the standing-charge flow.
-     *  3. Triggers a refresh in the background — the public Agile API in
-     *     demo mode, the authenticated API in real mode.
+     *  1. Starts the dashboard flow (which reads from the unified cache
+     *     stores) and the standing-charge flow.
+     *  2. Triggers a refresh in the background — the cache stores route
+     *     to the correct data source based on [UserPreferencesRepository.isDemoMode].
      */
     private fun loadData(range: DateRangeSelection): Job {
         return viewModelScope.launch {
             val (start, end) = getDateRange(range)
-
-            // Demo seeding is handled by the repository's observe* methods
-            // (auto-seed when DemoCacheStore is empty).
 
             _uiState.update {
                 it.copy(
@@ -224,8 +217,8 @@ class DashboardViewModel @Inject constructor(
             }
 
             coroutineScope {
-                // Observe the dashboard flow. The repository branches
-                // internally on hasCredentials: demo → DemoCacheStore, real → Room.
+                // Observe the dashboard flow. The unified cache stores
+                // handle demo/real branching internally.
                 launch {
                     getDashboardDataUseCase(start, end).collectLatest { points ->
                         updateDashboardWithPoints(points, start, end)
