@@ -73,7 +73,7 @@ fun HomeScreen(
         topBar = {
             TopAppBar(
                 title = {
-                    Text("Octopus Dashboard")
+                    Text("Dashboard for Octopus Agile")
                 },
                 navigationIcon = {
                     IconButton(onClick = onOpenDrawer) {
