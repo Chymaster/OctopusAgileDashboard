@@ -204,31 +204,20 @@ class OctopusRepositoryImpl @Inject constructor(
     override suspend fun refreshAgilePrices(start: Instant, end: Instant): Result<Unit> {
         return withContext(Dispatchers.IO) {
             try {
-                val tariffConfig = preferencesRepository.tariffConfig.first()
-                val startStr = DateTimeFormatter.ISO_INSTANT.format(start)
-                val endStr = DateTimeFormatter.ISO_INSTANT.format(end)
-                val allRates = fetchAllPages { url ->
-                    if (url != null) apiService.getAgileRatesByUrl(url)
-                    else apiService.getAgileRates(
-                        product = tariffConfig.productCode,
-                        tariff = tariffConfig.tariffCode,
-                        periodFrom = startStr,
-                        periodTo = endStr
-                    )
-                }
+                val allRates = fetchPublicAgilePrices(start, end)
 
                 if (isDemoMode()) {
                     // Demo: write the public API result to BOTH the in-memory
-                    // demo cache (so observeDashboardData and observeAgilePrices
-                    // see the fresh real prices) AND to Room (as a fallback).
-                    // The tariff code is the demo sentinel so the real-mode
-                    // refresh's INSERT REPLACE will overwrite these rows by
-                    // primary key when the user adds credentials.
+                    // demo cache AND Room (as a fallback). The tariff code is
+                    // the demo sentinel so the real-mode refresh's INSERT
+                    // REPLACE will overwrite these rows when the user adds
+                    // credentials.
                     val entities = allRates.map { it.toEntity(DemoIdentifiers.TARIFF) }
                     demoCacheStore.overwritePrices(entities)
                     agilePriceDao.insertAll(entities)
                     Result.success(Unit)
                 } else {
+                    val tariffConfig = preferencesRepository.tariffConfig.first()
                     // Insert with REPLACE strategy — no delete-first, avoids flash of empty data
                     val entities = allRates.map { it.toEntity(tariffConfig.tariffCode) }
                     agilePriceDao.insertAll(entities)
@@ -400,10 +389,16 @@ class OctopusRepositoryImpl @Inject constructor(
      */
     private suspend fun isDemoMode(): Boolean = !preferencesRepository.hasCredentials.first()
 
-    /** Seed the demo prices cache if empty, so the first [observeAgilePrices] emission is non-empty. */
-    private fun ensureDemoPricesSeeded(start: Instant, end: Instant) {
+    /** Fetch real Agile prices from the public API into the demo cache if empty. */
+    private suspend fun ensureDemoPricesSeeded(start: Instant, end: Instant) {
         if (demoCacheStore.prices.value.isEmpty()) {
-            demoCacheStore.seedPrices(start, end)
+            try {
+                val rates = fetchPublicAgilePrices(start, end)
+                val entities = rates.map { it.toEntity(DemoIdentifiers.TARIFF) }
+                demoCacheStore.overwritePrices(entities)
+            } catch (e: Exception) {
+                android.util.Log.w("OctopusRepo", "Failed to fetch public Agile prices for demo", e)
+            }
         }
     }
 
@@ -461,5 +456,24 @@ class OctopusRepositoryImpl @Inject constructor(
         } while (url != null)
 
         return allRates
+    }
+
+    /**
+     * Fetch Agile prices from the public (unauthenticated) Octopus endpoint.
+     * Uses the default tariff config which works without API credentials.
+     */
+    private suspend fun fetchPublicAgilePrices(start: Instant, end: Instant): List<AgileRateDto> {
+        val tariffConfig = preferencesRepository.tariffConfig.first()
+        val startStr = DateTimeFormatter.ISO_INSTANT.format(start)
+        val endStr = DateTimeFormatter.ISO_INSTANT.format(end)
+        return fetchAllPages { url ->
+            if (url != null) apiService.getAgileRatesByUrl(url)
+            else apiService.getAgileRates(
+                product = tariffConfig.productCode,
+                tariff = tariffConfig.tariffCode,
+                periodFrom = startStr,
+                periodTo = endStr
+            )
+        }
     }
 }
