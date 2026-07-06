@@ -1,7 +1,6 @@
 package com.chymaster.octopusagiledashboard.data.local
 
 import com.chymaster.octopusagiledashboard.core.util.DemoDataGenerator
-import com.chymaster.octopusagiledashboard.core.util.DemoIdentifiers
 import com.chymaster.octopusagiledashboard.data.local.dao.ConsumptionDao
 import com.chymaster.octopusagiledashboard.data.local.entity.ConsumptionEntity
 import com.chymaster.octopusagiledashboard.data.mapper.toDomain

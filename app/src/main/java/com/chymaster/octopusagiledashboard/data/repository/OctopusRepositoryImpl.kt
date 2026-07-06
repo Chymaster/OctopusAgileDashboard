@@ -1,8 +1,6 @@
 package com.chymaster.octopusagiledashboard.data.repository
 
 import com.chymaster.octopusagiledashboard.core.util.Constants
-import com.chymaster.octopusagiledashboard.core.util.DemoDataGenerator
-import com.chymaster.octopusagiledashboard.core.util.DemoIdentifiers
 import com.chymaster.octopusagiledashboard.data.local.ConsumptionCacheStore
 import com.chymaster.octopusagiledashboard.data.local.StandingChargeCacheStore
 import com.chymaster.octopusagiledashboard.data.local.dao.AgilePriceDao
@@ -112,8 +110,7 @@ class OctopusRepositoryImpl @Inject constructor(
 
     /**
      * Load agile prices for [start]..[end] into the in-memory cache.
-     * In demo mode, generates synthetic data and writes to Room.
-     * In real mode, reads from Room; if empty, fetches from the API.
+     * Reads from Room first; if empty, fetches from the public Octopus API.
      * If the requested range is already fully covered, this is a no-op.
      */
     override suspend fun loadAgilePrices(start: Instant, end: Instant) {
@@ -125,51 +122,34 @@ class OctopusRepositoryImpl @Inject constructor(
             return // already covered
         }
 
-        val isDemo = preferencesRepository.isDemoMode.first()
-        val entities = if (isDemo) {
-            val generated = DemoDataGenerator.generateAgilePriceEntities(start, end)
-            agilePriceDao.insertAll(generated)
-            generated
-        } else {
-            val roomEntities = agilePriceDao.queryRange(start.toEpochMilli(), end.toEpochMilli())
-            if (roomEntities.isEmpty()) {
-                val apiResult = fetchAndPersistAgilePrices(start, end)
-                if (apiResult.isSuccess) {
-                    agilePriceDao.queryRange(start.toEpochMilli(), end.toEpochMilli())
-                } else {
-                    emptyList()
-                }
+        val roomEntities = agilePriceDao.queryRange(start.toEpochMilli(), end.toEpochMilli())
+        val entities = if (roomEntities.isEmpty()) {
+            val apiResult = fetchAndPersistAgilePrices(start, end)
+            if (apiResult.isSuccess) {
+                agilePriceDao.queryRange(start.toEpochMilli(), end.toEpochMilli())
             } else {
-                roomEntities
+                emptyList()
             }
+        } else {
+            roomEntities
         }
 
         mergeAndEmitAgilePrices(entities, start, end)
     }
 
     /**
-     * Fetch fresh agile prices from the API (or generate synthetic data in demo mode),
+     * Fetch fresh agile prices from the public Octopus API,
      * persist to Room, and reload the in-memory cache.
-     *
-     * CRITICAL: In demo mode, does NOT call fetchAndPersist — this prevents real API
-     * prices from leaking into Room.
      */
     override suspend fun refreshAgilePrices(start: Instant, end: Instant): Result<Unit> {
         return withContext(Dispatchers.IO) {
             try {
-                val isDemo = preferencesRepository.isDemoMode.first()
-                if (isDemo) {
-                    val generated = DemoDataGenerator.generateAgilePriceEntities(start, end)
-                    agilePriceDao.insertAll(generated)
-                    mergeAndEmitAgilePrices(generated, start, end)
-                } else {
-                    val result = fetchAndPersistAgilePrices(start, end)
-                    if (result.isFailure) {
-                        return@withContext result
-                    }
-                    val entities = agilePriceDao.queryRange(start.toEpochMilli(), end.toEpochMilli())
-                    mergeAndEmitAgilePrices(entities, start, end)
+                val result = fetchAndPersistAgilePrices(start, end)
+                if (result.isFailure) {
+                    return@withContext result
                 }
+                val entities = agilePriceDao.queryRange(start.toEpochMilli(), end.toEpochMilli())
+                mergeAndEmitAgilePrices(entities, start, end)
                 Result.success(Unit)
             } catch (e: Exception) {
                 Result.failure(e)
@@ -180,28 +160,22 @@ class OctopusRepositoryImpl @Inject constructor(
     /**
      * Expand the cached agile price range backward by [additionalDays] days.
      * Used by infinite scroll-up in the Future Prices screen.
-     * In demo mode, generates synthetic data. In real mode, reads from Room first;
-     * if empty, fetches from the API.
+     * Reads from Room first; if empty, fetches from the public Octopus API.
      */
     override suspend fun expandAgilePriceHistoryBackward(additionalDays: Int) {
         val currentStart = cachedPricesStart ?: return
         val newStart = currentStart.minusSeconds(additionalDays.toLong() * 86400)
 
-        val isDemo = preferencesRepository.isDemoMode.first()
-        val newEntities = if (isDemo) {
-            DemoDataGenerator.generateAgilePriceEntities(newStart, currentStart)
-        } else {
-            val roomEntities = agilePriceDao.queryRange(newStart.toEpochMilli(), currentStart.toEpochMilli())
-            if (roomEntities.isEmpty()) {
-                val apiResult = fetchAndPersistAgilePrices(newStart, currentStart)
-                if (apiResult.isSuccess) {
-                    agilePriceDao.queryRange(newStart.toEpochMilli(), currentStart.toEpochMilli())
-                } else {
-                    emptyList()
-                }
+        val roomEntities = agilePriceDao.queryRange(newStart.toEpochMilli(), currentStart.toEpochMilli())
+        val newEntities = if (roomEntities.isEmpty()) {
+            val apiResult = fetchAndPersistAgilePrices(newStart, currentStart)
+            if (apiResult.isSuccess) {
+                agilePriceDao.queryRange(newStart.toEpochMilli(), currentStart.toEpochMilli())
             } else {
-                roomEntities
+                emptyList()
             }
+        } else {
+            roomEntities
         }
 
         if (newEntities.isNotEmpty()) {
