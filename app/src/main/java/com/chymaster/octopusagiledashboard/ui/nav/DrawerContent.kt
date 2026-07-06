@@ -36,7 +36,7 @@ fun DrawerContent(
     ) {
         Spacer(modifier = Modifier.height(16.dp))
         Text(
-            text = "Octopus Dashboard",
+            text = "Dashboard for Octopus Agile",
             style = MaterialTheme.typography.titleLarge,
             fontWeight = FontWeight.Bold,
             modifier = Modifier.padding(horizontal = 16.dp)
