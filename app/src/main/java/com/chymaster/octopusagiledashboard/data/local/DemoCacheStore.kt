@@ -73,6 +73,14 @@ class DemoCacheStore @Inject constructor() {
     }
 
     /**
+     * Replace the consumption cache with [newConsumption]. Used by the
+     * demo-mode refresh so the StateFlow re-emits and observers update.
+     */
+    fun overwriteConsumption(newConsumption: List<ConsumptionEntity>) {
+        _consumption.value = newConsumption
+    }
+
+    /**
      * Replace the standing charge cache with [newCharges]. Currently only
      * ever called with the single synthetic entity (the demo standing charge
      * is fixed), but kept symmetric with [overwritePrices] for future

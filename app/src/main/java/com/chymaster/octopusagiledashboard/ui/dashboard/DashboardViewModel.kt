@@ -2,7 +2,6 @@ package com.chymaster.octopusagiledashboard.ui.dashboard
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.chymaster.octopusagiledashboard.data.local.DemoCacheStore
 import com.chymaster.octopusagiledashboard.data.prefs.UserPreferencesRepository
 import com.chymaster.octopusagiledashboard.data.repository.OctopusRepository
 import com.chymaster.octopusagiledashboard.domain.model.DateRangeSelection
@@ -74,8 +73,7 @@ class DashboardViewModel @Inject constructor(
     private val getDashboardDataUseCase: GetDashboardDataUseCase,
     private val refreshDashboardDataUseCase: RefreshDashboardDataUseCase,
     private val repository: OctopusRepository,
-    private val preferencesRepository: UserPreferencesRepository,
-    private val demoCacheStore: DemoCacheStore
+    private val preferencesRepository: UserPreferencesRepository
 ) : ViewModel() {
 
     private val londonZone = ZoneId.of("Europe/London")
@@ -91,29 +89,12 @@ class DashboardViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
-            // Track credential state. On every change (including the first
-            // emission when the ViewModel starts), update the UI flag. On a
-            // flip (demo↔real) wipe BOTH caches so the chart switches
-            // sources without a flash of stale data, then reload.
-            var prev: Boolean? = null
             preferencesRepository.hasCredentials.collect { hasCreds ->
-                val flipped = prev != null && prev != hasCreds
-                if (flipped) {
-                    // Purge both caches on a mode switch:
-                    //  - demo → real: rows tagged with the demo tariff code
-                    //    linger in Room from the public-API refresh; without a
-                    //    wipe they briefly appear on the real Dashboard.
-                    //  - real → demo: the previous user's prices and
-                    //    consumption would flash on the demo chart.
-                    demoCacheStore.clearAll()
-                    repository.purgeAllUserData()
-                }
-                prev = hasCreds
                 _uiState.update { it.copy(hasCredentials = hasCreds) }
-                // Always reload: handles both the initial load (first
-                // emission) and mode switches (flipped). The cancelled job
-                // is fine — loadData reads hasCredentials from _uiState
-                // which is already updated above.
+                // Cache wipe is handled by the repository (via
+                // UserPreferencesRepository.saveCredentials) and the
+                // observe* methods use transformLatest to react to
+                // credential changes automatically.
                 dataJob?.cancel()
                 dataJob = loadData(_selectedRange.value)
             }
@@ -226,14 +207,8 @@ class DashboardViewModel @Inject constructor(
             val (start, end) = getDateRange(range)
             val hasCreds = _uiState.value.hasCredentials
 
-            // Seed the demo store BEFORE observing so the first emission
-            // is non-empty. In real mode this branch is skipped — the
-            // repository reads from Room, which is the source of truth.
-            if (!hasCreds) {
-                demoCacheStore.seedConsumption(start, end)
-                demoCacheStore.seedPrices(start, end)
-                demoCacheStore.seedStandingCharge()
-            }
+            // Demo seeding is handled by the repository's observe* methods
+            // (auto-seed when DemoCacheStore is empty).
 
             _uiState.update {
                 it.copy(
