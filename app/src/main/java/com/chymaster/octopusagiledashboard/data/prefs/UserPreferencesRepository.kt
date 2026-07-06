@@ -78,6 +78,9 @@ class UserPreferencesRepository @Inject constructor(
         !key.isNullOrBlank() && !mpan.isNullOrBlank() && !serial.isNullOrBlank()
     }
 
+    /** Single source of truth for whether the app is in demo mode. */
+    val isDemoMode: Flow<Boolean> = hasCredentials.map { !it }
+
     val tariffConfig: Flow<TariffConfig> = combine(productCodeFlow, gspFlow) { product, gsp ->
         val effectiveProduct = product?.takeIf { it.isNotBlank() } ?: Constants.DEFAULT_PRODUCT_CODE
         val effectiveGsp = gsp?.takeIf { it.isNotBlank() } ?: Constants.DEFAULT_GSP

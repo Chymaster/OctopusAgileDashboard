@@ -2,7 +2,6 @@ package com.chymaster.octopusagiledashboard.core.util
 
 import com.chymaster.octopusagiledashboard.data.local.entity.AgilePriceEntity
 import com.chymaster.octopusagiledashboard.data.local.entity.ConsumptionEntity
-import com.chymaster.octopusagiledashboard.data.local.entity.StandingChargeEntity
 import com.chymaster.octopusagiledashboard.domain.model.HalfHourPoint
 import java.time.Instant
 import java.time.ZoneId
@@ -23,24 +22,14 @@ import java.util.Random
  * The generator has two output shapes:
  *  - [generate] returns the unified [HalfHourPoint] model (used for in-memory rendering
  *    and tests).
- *  - [generateConsumptionEntities] / [generateAgilePriceEntities] /
- *    [generateStandingChargeEntity] produce Room-shaped entities so the demo data can
+ *  - [generateConsumptionEntities] / [generateAgilePriceEntities]
+ *    produce Room-shaped entities so the demo data can
  *    be cached in the in-memory [com.chymaster.octopusagiledashboard.data.local.DemoCacheStore]
  *    and flow through the same observe→refresh pipeline as the real API.
  */
 object DemoDataGenerator {
 
     private val londonZone = ZoneId.of("Europe/London")
-
-    /** Synthetic standing charge in pence per day (typical UK value). */
-    const val DEMO_STANDING_CHARGE_PENCE_PER_DAY = 50.0
-
-    /**
-     * Validity window for the synthetic standing charge entity. Standing charges
-     * don't have 30-minute slots, so we use a wide window to cover any query range
-     * without needing a per-range entity.
-     */
-    private const val STANDING_CHARGE_VALIDITY_SECONDS = 10L * 365 * 24 * 3600
 
     /** VAT factor used to back out the ex-VAT figure from the inc-VAT figure. */
     private const val VAT_DIVISOR = 1.05
@@ -135,23 +124,6 @@ object DemoDataGenerator {
             t = next
         }
         return rows
-    }
-
-    /**
-     * Generate a single [StandingChargeEntity] valid from epoch 0 to [now] plus
-     * 10 years, so it covers any realistic query range without needing a per-range
-     * entity. The single entity matches the real API's "open-ended" standing
-     * charge pattern (see [com.chymaster.octopusagiledashboard.data.mapper.STANDING_CHARGE_FALLBACK_SECONDS]).
-     */
-    fun generateStandingChargeEntity(now: Instant): StandingChargeEntity {
-        val valueIncVat = DEMO_STANDING_CHARGE_PENCE_PER_DAY
-        return StandingChargeEntity(
-            validFrom = 0L,
-            validTo = now.plusSeconds(STANDING_CHARGE_VALIDITY_SECONDS).toEpochMilli(),
-            valueExcVat = roundTo(valueIncVat / VAT_DIVISOR, 4),
-            valueIncVat = valueIncVat,
-            tariffCode = DemoIdentifiers.TARIFF
-        )
     }
 
     /**

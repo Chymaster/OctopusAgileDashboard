@@ -35,7 +35,8 @@ fun AppNavGraph(
     preferencesRepository: UserPreferencesRepository,
     navController: NavHostController
 ) {
-    val hasCredentials by preferencesRepository.hasCredentials.collectAsState(initial = false)
+    val isDemoMode by preferencesRepository.isDemoMode.collectAsState(initial = true)
+    val hasCredentials = !isDemoMode
     val scope = rememberCoroutineScope()
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val currentBackStackEntry by navController.currentBackStackEntryAsState()
@@ -47,7 +48,7 @@ fun AppNavGraph(
         drawerContent = {
             DrawerContent(
                 currentRoute = currentRoute,
-                hasCredentials = hasCredentials,
+                isDemoMode = isDemoMode,
                 onNavigate = { route ->
                     navController.navigate(route) {
                         launchSingleTop = true

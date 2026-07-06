@@ -2,8 +2,8 @@ package com.chymaster.octopusagiledashboard.ui.future
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.chymaster.octopusagiledashboard.data.local.AgilePriceCacheStore
 import com.chymaster.octopusagiledashboard.data.prefs.UserPreferencesRepository
+import com.chymaster.octopusagiledashboard.data.repository.OctopusRepository
 import com.chymaster.octopusagiledashboard.domain.model.AgilePrice
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -41,7 +41,7 @@ data class FuturePricesUiState(
 @OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class FuturePricesViewModel @Inject constructor(
-    private val agilePriceCacheStore: AgilePriceCacheStore,
+    private val repository: OctopusRepository,
     private val preferencesRepository: UserPreferencesRepository
 ) : ViewModel() {
 
@@ -93,19 +93,19 @@ class FuturePricesViewModel @Inject constructor(
             val initialStart = now.minusDays(2).atStartOfDay(londonZone).toInstant()
             val futureEnd = now.plusDays(2).atStartOfDay(londonZone).toInstant()
 
-            // Load from cache store (handles demo/real internally)
-            agilePriceCacheStore.loadRange(initialStart, futureEnd)
+            // Load from repository (handles demo/real internally)
+            repository.loadAgilePrices(initialStart, futureEnd)
 
             _uiState.update { it.copy(loadedStartDay = now.minusDays(2)) }
 
-            // Observe prices from cache store — the range dynamically expands
+            // Observe prices from repository — the range dynamically expands
             // when loadedStartDay changes (via loadOlderPrices or jumpToDate).
             launch {
                 _uiState
                     .flatMapLatest { state ->
                         val startDay = state.loadedStartDay ?: now.minusDays(2)
                         val startInstant = startDay.atStartOfDay(londonZone).toInstant()
-                        agilePriceCacheStore.observeRange(startInstant, futureEnd)
+                        repository.observeAgilePrices(startInstant, futureEnd)
                     }
                     .distinctUntilChanged()
                     .collectLatest { prices ->
@@ -122,7 +122,7 @@ class FuturePricesViewModel @Inject constructor(
 
             // Background refresh from API
             launch {
-                val result = agilePriceCacheStore.refreshFromApi(initialStart, futureEnd)
+                val result = repository.refreshAgilePrices(initialStart, futureEnd)
                 if (result.isFailure && _uiState.value.prices.isEmpty()) {
                     _uiState.update {
                         it.copy(
@@ -151,11 +151,11 @@ class FuturePricesViewModel @Inject constructor(
             val endInstant = currentStart.atStartOfDay(londonZone).toInstant()
 
             // Check if there's any data in the cache for this range
-            val existingPrices = agilePriceCacheStore.observeRange(startInstant, endInstant).first()
+            val existingPrices = repository.observeAgilePrices(startInstant, endInstant).first()
 
             if (existingPrices.isEmpty()) {
                 // Try fetching from API
-                val result = agilePriceCacheStore.refreshFromApi(startInstant, endInstant)
+                val result = repository.refreshAgilePrices(startInstant, endInstant)
                 if (result.isFailure) {
                     _uiState.update { it.copy(isLoadingOlder = false) }
                     return@launch
@@ -163,7 +163,7 @@ class FuturePricesViewModel @Inject constructor(
             }
 
             // Expand the cache range backward
-            agilePriceCacheStore.expandHistoryBackward(1)
+            repository.expandAgilePriceHistoryBackward(1)
 
             _uiState.update {
                 it.copy(
@@ -186,18 +186,18 @@ class FuturePricesViewModel @Inject constructor(
             val endInstant = date.plusDays(1).atStartOfDay(londonZone).toInstant()
 
             // Ensure data is loaded for the target date
-            agilePriceCacheStore.loadRange(startInstant, endInstant)
+            repository.loadAgilePrices(startInstant, endInstant)
 
             // If cache was empty, try API
-            val cached = agilePriceCacheStore.observeRange(startInstant, endInstant).first()
+            val cached = repository.observeAgilePrices(startInstant, endInstant).first()
             if (cached.isEmpty()) {
-                agilePriceCacheStore.refreshFromApi(startInstant, endInstant)
+                repository.refreshAgilePrices(startInstant, endInstant)
             }
 
             // Expand loaded range if the date is before our current start
             val currentStart = _uiState.value.loadedStartDay
             if (currentStart == null || date < currentStart) {
-                agilePriceCacheStore.expandHistoryBackward(
+                repository.expandAgilePriceHistoryBackward(
                     java.time.temporal.ChronoUnit.DAYS.between(date, currentStart ?: date).toInt()
                 )
                 _uiState.update { it.copy(loadedStartDay = date) }

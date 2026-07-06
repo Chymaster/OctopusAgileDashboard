@@ -6,111 +6,215 @@ This document describes how data flows from source to screen in OctopusDashboard
 
 The app operates in one of two modes, determined automatically by whether the user has configured their Octopus Energy credentials (API key, MPAN, serial number):
 
-| Mode | Trigger | Price Source | Consumption Source |
-|------|---------|-------------|-------------------|
-| **Real** | All three credentials saved | Octopus authenticated API → Room | Octopus authenticated API → Room |
-| **Demo** | Any credential missing | Octopus public API (unauthenticated) → DemoCacheStore | DemoDataGenerator (synthetic) → DemoCacheStore |
+| Mode | Trigger | Price Source | Consumption Source | Standing Charge Source | Green Energy | Flexible Price |
+|------|---------|-------------|-------------------|----------------------|-------------|---------------|
+| **Real** | All three credentials saved | Octopus public API → Room | Octopus authenticated API → Room | Octopus public API → Room | Carbon Intensity API (in-memory) | Octopus public API |
+| **Demo** | Any credential missing | DemoDataGenerator (synthetic) → Room | DemoDataGenerator (synthetic) → Room | Octopus public API → Room | Carbon Intensity API (in-memory) | Octopus public API |
 
-There is no explicit "demo mode" toggle. The mode is inferred from `UserPreferencesRepository.hasCredentials`, a `Flow<Boolean>` that emits `true` only when API key, MPAN, and serial number are all non-blank.
+**Octopus data types use Room as the unified persistence layer**, regardless of mode. The difference is only in where the data originates (real API vs. synthetic generator).
+
+Green energy data and the flexible tariff price are always fetched live from their respective APIs — they are not mode-dependent.
+
+### Mode Tracking
+
+The single source of truth for demo mode is `UserPreferencesRepository.isDemoMode: Flow<Boolean>`, derived from `hasCredentials`:
+
+```kotlin
+val hasCredentials: Flow<Boolean> = combine(apiKeyFlow, mpanFlow, serialNumberFlow) { key, mpan, serial ->
+    !key.isNullOrBlank() && !mpan.isNullOrBlank() && !serial.isNullOrBlank()
+}
+val isDemoMode: Flow<Boolean> = hasCredentials.map { !it }
+```
+
+All code that needs to know the mode refers to `isDemoMode` (Flow contexts) or `isDemoMode.first()` (suspend contexts).
+
+## Per-Screen Data Map
+
+| Screen | Data Displayed | Source Chain |
+|--------|---------------|-------------|
+| **Home** | Current Agile price + 6h timeline | `OctopusRepository.observeAgilePrices()` (in-memory StateFlow backed by Room) |
+| **Home** | Flexible tariff reference price | `OctopusRepository.fetchFlexiblePrice()` → cached in DataStore |
+| **Home** | Green energy fuel mix pie | `GreenEnergyRepositoryImpl` → Carbon Intensity API (in-memory cache, 15-min TTL) |
+| **Dashboard** | HalfHourPoints (price + consumption combined) | `GetDashboardDataUseCase` → `OctopusRepository.observeDashboardData()` combining agile price entities (managed by `OctopusRepositoryImpl`) + `ConsumptionCacheStore` entities |
+| **Dashboard** | Standing charge cost | `OctopusRepository.observeStandingCharges()` → `StandingChargeCacheStore` |
+| **Dashboard** | Usage cost, total kWh, avg/min/max price | Computed from `HalfHourPoint` list |
+| **Dashboard** | Green/amber/red usage zone breakdown | Computed from points + flexible price + user thresholds |
+| **Dashboard** | Flexible tariff reference price | `OctopusRepository.fetchFlexiblePrice()` → cached in DataStore |
+| **Future Prices** | Half-hourly Agile prices (past + future) | `OctopusRepository` (supports infinite scroll-back via `expandAgilePriceHistoryBackward`) |
+| **Future Prices** | Flexible tariff reference price | DataStore cache (set by Home or Dashboard) |
+| **Settings** | Credential fields, tariff code | `UserPreferencesRepository` DataStore flows |
+| **Drawer** | Demo mode indicator | `UserPreferencesRepository.isDemoMode` |
 
 ## Layered Architecture
 
 ```
-┌─────────────────────────────────────────────────────┐
-│                    UI Layer                          │
-│  HomeScreen / DashboardScreen / FuturePricesScreen   │
-│              ↕ collectAsState                        │
-│  HomeViewModel / DashboardViewModel / FuturePricesVM │
-└──────────────────────┬──────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│                         UI Layer                                 │
+│  HomeScreen / DashboardScreen / FuturePricesScreen / SettingsScreen│
+│                     ↕ collectAsState                             │
+│  HomeViewModel / DashboardViewModel / FuturePricesViewModel      │
+│  (collect preferencesRepository.isDemoMode)                      │
+└──────────────────────┬───────────────────────────────────────────┘
                        │ observe*() / refresh*()
-┌──────────────────────▼──────────────────────────────┐
-│                  Domain Layer                        │
-│  GetDashboardDataUseCase / RefreshDashboardDataUseCase│
-└──────────────────────┬──────────────────────────────┘
+┌──────────────────────▼───────────────────────────────────────────┐
+│                       Domain Layer                               │
+│  GetDashboardDataUseCase / RefreshDashboardDataUseCase           │
+└──────────────────────┬───────────────────────────────────────────┘
                        │ delegates to
-┌──────────────────────▼──────────────────────────────┐
-│              Repository Layer                        │
-│              OctopusRepositoryImpl                    │
-│  ┌─────────────────┐  ┌──────────────────────────┐  │
-│  │  Real API Path   │  │    Demo Data Path        │  │
-│  │  OctopusApiService│  │  DemoDataGenerator       │  │
-│  │       ↓          │  │       ↓                  │  │
-│  │    Room DAOs      │  │  DemoCacheStore          │  │
-│  └─────────────────┘  └──────────────────────────┘  │
-│                       ↑                              │
-│          hasCredentials.transformLatest               │
-└──────────────────────────────────────────────────────┘
+┌──────────────────────▼───────────────────────────────────────────┐
+│                   Repository Layer                                │
+│                   OctopusRepositoryImpl                           │
+│  ┌─────────────────────────────────────────────────────────────┐ │
+│  │  Unified Cache Stores (in-memory StateFlow + Room backup)   │ │
+│  │  Agile prices (inline)      ← prices (StateFlow + Room)    │ │
+│  │  ConsumptionCacheStore      ← consumption                   │ │
+│  │  StandingChargeCacheStore   ← standing charges              │ │
+│  └─────────────────────────────────────────────────────────────┘ │
+│  ┌─────────────────────────────────────────────────────────────┐ │
+│  │  GreenEnergyRepositoryImpl  ← grid fuel mix (no Room)       │ │
+│  │  fetchFlexiblePrice()       ← live API call (cached in DS)  │ │
+│  └─────────────────────────────────────────────────────────────┘ │
+└──────────────────────────────────────────────────────────────────┘
                        │
-┌──────────────────────▼──────────────────────────────┐
-│              Preferences Layer                       │
-│  UserPreferencesRepository (DataStore + Encrypted)   │
-│  hasCredentials: Flow<Boolean>                       │
-└──────────────────────────────────────────────────────┘
+┌──────────────────────▼───────────────────────────────────────────┐
+│                   Preferences Layer                               │
+│  UserPreferencesRepository (DataStore + Encrypted)                │
+│  isDemoMode: Flow<Boolean>  ← single source of truth             │
+│  hasCredentials: Flow<Boolean>                                    │
+│  cachedFlexiblePrice / cachedFlexiblePriceTimestamp               │
+└──────────────────────────────────────────────────────────────────┘
 ```
+
+## Unified Cache Store Pattern
+
+Two of the three Octopus data types (consumption, standing charges) use a dedicated `@Singleton` cache store that:
+
+1. Maintains an in-memory `MutableStateFlow<List<Entity>>` as the reactive source of truth
+2. Tracks the cached time range (`cachedStart`/`cachedEnd`) to avoid redundant fetches
+3. Branches internally on `isDemoMode` to route to the correct data source
+4. Persists to Room for cross-restart caching
+5. Provides `observeRange()` (domain objects) and `observeRangeEntities()` (raw entities) as reactive Flows
+6. Provides `loadRange()`, `refreshFromApi()`, and `clear()` as imperative mutation methods
+
+### Agile Prices (managed inline by OctopusRepositoryImpl)
+
+```
+Demo mode:  DemoDataGenerator.generateAgilePriceEntities() → agilePriceDao.insertAll() → in-memory StateFlow → UI
+Real mode:  Public Agile API → agilePriceDao.insertAll() → in-memory StateFlow → UI
+```
+
+- Agile prices are managed directly by `OctopusRepositoryImpl` using an in-memory `MutableStateFlow<List<AgilePriceEntity>>` backed by Room.
+- Demo mode generates **synthetic** prices using a sinusoidal time-of-day model (`DemoDataGenerator`). Prices are written to Room for persistence across restarts.
+- Real mode fetches real UK market prices from the public (unauthenticated) Octopus endpoint.
+- **`refreshAgilePrices()` in demo mode does NOT hit the API** — it only generates synthetic data and writes to Room. This prevents real API prices from leaking into Room in demo mode.
+- Supports `expandAgilePriceHistoryBackward()` for infinite scroll-up in the Future Prices screen.
+
+### ConsumptionCacheStore (synthetic demo / real API)
+
+```
+Demo mode:  DemoDataGenerator.generateConsumptionEntities() → consumptionDao.insertAll() → in-memory StateFlow → UI
+Real mode:  Octopus Usage API (authenticated) → consumptionDao.insertAll() → in-memory StateFlow → UI
+```
+
+- Demo mode generates **synthetic** consumption data using a time-of-day household profile. Data is written to Room for persistence.
+- Real mode fetches from the authenticated Octopus usage API (requires mpan + serial). Follows pagination links.
+- `clear()` wipes both the in-memory cache and Room (`consumptionDao.deleteAll()`).
+
+### StandingChargeCacheStore (always real API)
+
+```
+Public Standing Charge API → standingChargeDao.insertAll() → in-memory StateFlow → UI
+```
+
+- Both modes fetch **real** standing charges from the public (unauthenticated) Octopus endpoint.
+- In demo mode, uses default tariff config (`Constants.DEFAULT_PRODUCT_CODE` + `Constants.DEFAULT_GSP`) since no credentials are set.
+- Data persists in Room across app restarts.
+
+### GreenEnergyRepositoryImpl (always live API, no Room)
+
+```
+UK Carbon Intensity API (https://api.carbonintensity.org.uk/generation) → in-memory cache → UI
+```
+
+- Fetches real-time UK grid generation mix (wind, solar, nuclear, gas, coal, etc.).
+- **No Room persistence** — in-memory cache only, with 15-minute TTL.
+- On API failure, returns stale cached data if available.
+- Refreshed every 15 minutes by `HomeViewModel.startGreenEnergyRefreshLoop()`.
+- Not mode-dependent — same real data in both demo and real mode.
+
+### Flexible Tariff Price (live API, DataStore cache)
+
+```
+Octopus public API (flexible product tariff) → DataStore cache → UI
+```
+
+- `OctopusRepository.fetchFlexiblePrice()` fetches the current flexible tariff rate from the Octopus public API.
+- Uses cascading time windows (tightest first) to find the in-progress rate.
+- Cached in `UserPreferencesRepository` DataStore with a 30-day TTL.
+- Used by both Home and Dashboard screens as the reference price for green/amber/red zone coloring.
+- Not mode-dependent — same real data in both demo and real mode.
 
 ## Real API Data Flow
 
 When credentials are present:
 
 ```
-Octopus API (authenticated)
+Octopus API (authenticated for consumption, public for prices/standing charges)
     │
     ▼
-refreshAgilePrices() / refreshConsumption() / refreshStandingCharges()
+Cache Store.refreshFromApi()
     │  DTO → Entity (via mappers)
     ▼
 Room DAOs (insertAll with REPLACE strategy)
-    │  Room emits via Flow on table change
+    │  mergeAndEmit() updates in-memory StateFlow
     ▼
-OctopusRepositoryImpl.observe*()
+Cache Store.observeRange()
     │  Entity → Domain model
     ▼
-Use Cases → ViewModels → Compose UI
+OctopusRepositoryImpl → Use Cases → ViewModels → Compose UI
 ```
 
 **Key characteristics:**
-- Room is the single source of truth and the persistent cache
-- `observe*` methods return `Flow`s backed by Room DAO queries
-- `refresh*` methods fetch from the API and write to Room
-- Room's `OnConflictStrategy.REPLACE` means refreshes atomically overwrite existing rows without a delete-first step (no flash of empty data)
-- The `AuthInterceptor` adds `Authorization: Basic` headers only to endpoints under `/electricity-meter-points/` and `/consumption/`; public endpoints (product/tariff rates) are not authenticated
+- Room is the persistent cache; the in-memory `StateFlow` is the reactive source of truth
+- `observe*` methods return `Flow`s backed by the in-memory cache (filtered by time range)
+- `refresh*` methods fetch from the API, write to Room, and reload the in-memory cache
+- Room's `OnConflictStrategy.REPLACE` means refreshes atomically overwrite existing rows
+- The `AuthInterceptor` adds `Authorization: Basic` headers only to endpoints under `/electricity-meter-points/` and `/consumption/`; public endpoints are not authenticated
 
 ## Demo Data Flow
 
 When credentials are absent:
 
 ```
-                    ┌──────────────────┐
-                    │  Public Agile API │ (unauthenticated)
-                    │  (real prices)    │
-                    └────────┬─────────┘
-                             │
-DemoDataGenerator            │
-(synthetic consumption)      │
-         │                   │
-         ▼                   ▼
-    DemoCacheStore (in-memory StateFlow cache)
-    ├── prices        ← public API (real market data)
-    ├── consumption   ← DemoDataGenerator (synthetic)
-    └── standingCharges ← DemoDataGenerator (synthetic)
+DemoDataGenerator                    Public Octopus APIs              Carbon Intensity API
+(synthetic consumption + prices)     (real standing charges)          (real grid mix)
+         │                                    │                            │
+         ▼                                    ▼                            ▼
+    ┌─────────────────────────────────────────────────┐              ┌──────────────┐
+    │  ConsumptionCacheStore    ← synthetic data      │              │  In-memory   │
+    │  OctopusRepositoryImpl    ← synthetic prices    │              │  cache only  │
+    │  StandingChargeCacheStore ← real standing charges│             │  (15m TTL)   │
+    │  (all: in-memory StateFlow, backed by Room)     │              └──────────────┘
+    └─────────────────────────────────────────────────┘
          │
          ▼
     OctopusRepositoryImpl.observe*()
-         │  transformLatest(hasCredentials)
+         │
          ▼
     Use Cases → ViewModels → Compose UI
 ```
 
 **Key characteristics:**
-- `DemoCacheStore` is a `@Singleton` in-memory cache backed by `MutableStateFlow` — data does not persist across app restarts
-- **Prices are real**: the public Octopus Agile endpoint (`/products/{product}/electricity-tariffs/{tariff}/standard-unit-rates/`) does not require authentication. The app fetches real UK market prices at seed time and on every refresh
-- **Consumption is synthetic**: `DemoDataGenerator` produces deterministic half-hour consumption data using a time-of-day profile (overnight baseline, morning/evening peaks) seeded by epoch second so the same date always yields the same data
-- If the public API is unreachable (offline), the price cache stays empty — no synthetic price data is ever written
-- Standing charges are synthetic (fixed 50p/day) since the standing charge endpoint requires authentication
+- **Prices and consumption are synthetic**: generated by `DemoDataGenerator` with deterministic time-of-day profiles
+- **Standing charges are real**: fetched from the public Octopus endpoint using default tariff config
+- **Green energy is real**: fetched from the UK Carbon Intensity API (same as real mode)
+- **Flexible price is real**: fetched from the Octopus public API (same as real mode)
+- All Octopus cache stores write to Room for persistence across app restarts
+- If the public API is unreachable (offline), cached data from Room is used; if Room is also empty, the cache stays empty
 
 ## Cache Wipe on Credential Change
 
-When the user saves credentials in Settings (or removes them), **both caches are wiped**:
+When the user saves credentials in Settings (or removes them), **all Octopus caches are wiped**:
 
 ```
 SettingsViewModel.save()
@@ -121,75 +225,71 @@ UserPreferencesRepository.saveCredentials()
     │
     ▼
 OctopusRepository.wipeAllCaches()
-    ├── DemoCacheStore.clearAll()   (in-memory)
-    └── Room: deleteAll() on all three tables
+    ├── Agile prices: clear StateFlow + cachedPricesStart/End + agilePriceDao.deleteAll()
+    ├── ConsumptionCacheStore.clear()      (in-memory + Room)
+    └── StandingChargeCacheStore.clear()   (in-memory + Room)
 ```
 
-This is triggered inside `saveCredentials()` via `Lazy<OctopusRepository>` injection (Lazy breaks the circular dependency: `UserPreferencesRepository` → `OctopusRepository` → `UserPreferencesRepository`).
+This is triggered inside `saveCredentials()` via `Lazy<OctopusRepository>` injection (Lazy breaks the circular dependency).
 
-After the wipe, `hasCredentials` emits a new value. All active `observe*` flows are running `transformLatest(hasCredentials)`, which:
-1. Cancels the current inner subscription (demo or real)
-2. Switches to the new mode's data source
-3. Auto-seeds the demo cache if switching to demo mode
+**Not wiped:** Green energy in-memory cache and flexible price DataStore cache. These are not mode-dependent and contain real data regardless.
 
-## Auto-Seed on Empty Cache
+After the wipe, `isDemoMode` emits a new value. ViewModels re-trigger data loading, which calls `loadRange()` on the cache stores. The cache stores check `isDemoMode.first()` at execution time and route to the correct data source.
 
-Each `observe*` method in the repository follows the same pattern:
+## Use Case Layer
 
-```kotlin
-preferencesRepository.hasCredentials
-    .distinctUntilChanged()
-    .transformLatest { hasCreds ->
-        if (!hasCreds) {
-            ensureDemo*Seeded(start, end)  // populate if empty
-            emitAll(demoCacheStore.*.map { ... })
-        } else {
-            emitAll(dao.observeRange(...).map { ... })
-        }
-    }
-```
-
-The `ensureDemo*Seeded()` helpers check if the cache is empty and populate it before the first `emitAll()`. This guarantees the first emission from the `StateFlow` is non-empty — no flicker.
-
-- `ensureDemoPricesSeeded()` — calls the public Agile API; on failure, cache stays empty
-- `ensureDemoConsumptionSeeded()` — calls `DemoDataGenerator.generateConsumptionEntities()`
-- `ensureDemoStandingChargeSeeded()` — calls `DemoDataGenerator.generateStandingChargeEntity()`
+| Use Case | Invoked By | What It Does |
+|----------|-----------|-------------|
+| `GetDashboardDataUseCase` | `DashboardViewModel.loadData()` | Returns `repository.observeDashboardData(start, end)` — a combined Flow of prices + consumption as `HalfHourPoint`s |
+| `RefreshDashboardDataUseCase` | `DashboardViewModel.onRefresh()` / `loadData()` | Calls `refreshAgilePrices` + `refreshConsumption` + `refreshStandingCharges` in parallel. Prices are required; consumption and standing charges are optional (won't fail the refresh). |
+| `TestConnectionUseCase` | `SettingsViewModel.testConnection()` | Calls `repository.testConnection()` → `apiService.getMeterPoint(mpan)` to verify credentials |
 
 ## Key Design Decisions
 
-### Why `transformLatest` instead of `flatMapLatest`?
+### Why a single `isDemoMode` flow?
 
-`transformLatest` provides a `FlowCollector` with `emitAll`, letting us run synchronous operations (like seeding the cache) before subscribing to the inner flow. `flatMapLatest` only returns a `Flow` — there's no hook to run code between the outer emission and the inner subscription.
+All mode-dependent logic derives from one `Flow<Boolean>` in `UserPreferencesRepository`. This eliminates scattered `!hasCredentials` computations and makes the mode tracking explicit and centralized.
 
-### Why `distinctUntilChanged()` on `hasCredentials`?
+### Why do all cache stores write to Room?
 
-`hasCredentials` is derived from combining three flows (`apiKeyFlow`, `mpanFlow`, `serialNumberFlow`). A single `saveCredentials()` call can trigger multiple emissions. `distinctUntilChanged()` collapses rapid-fire emissions of the same boolean value, preventing the inner flow from being cancelled and restarted unnecessarily.
+Writing demo data to Room means the app can show data immediately on restart without re-generating. It also means the cache store's `loadRange()` can check Room first (fast) before hitting the API or generator (slower).
 
 ### Why `Lazy<OctopusRepository>` in `UserPreferencesRepository`?
 
-`OctopusRepositoryImpl` depends on `UserPreferencesRepository` (for credential flows). Adding a reverse dependency (`UserPreferencesRepository` → `OctopusRepository`) creates a circular singleton initialization. `dagger.Lazy<T>` defers the lookup until `.get()` is called at runtime, breaking the cycle. Hilt handles this natively.
+`OctopusRepositoryImpl` depends on `UserPreferencesRepository`. Adding a reverse dependency creates a circular singleton initialization. `dagger.Lazy<T>` defers the lookup until `.get()` is called at runtime, breaking the cycle.
 
-### Why does `refreshAgilePrices` write to both DemoCacheStore AND Room in demo mode?
+### Why are demo prices and consumption synthetic but standing charges real?
 
-Room write is a fallback. If the app switches from demo to real mode (user adds credentials), the Room tables already contain recent public API prices. The real-mode `insertAll` with `REPLACE` strategy will overwrite them by primary key with properly tariffed data. Without the Room write, switching modes would show empty data until the real refresh completes.
+The Octopus Agile prices and standing charges endpoints are both public (unauthenticated). However, `OctopusRepositoryImpl` generates synthetic prices in demo mode to provide a consistent, deterministic demo experience. In demo mode, `refreshAgilePrices()` does NOT hit the API — it only generates synthetic data. This prevents real API prices from leaking into Room. Standing charges are always real because they are simple (one value per day) and don't reveal sensitive data. Consumption requires authentication with the user's actual meter credentials, so it must be synthetic in demo mode.
 
-### Why are demo prices real but consumption synthetic?
+### Why is green energy not in Room?
 
-The Octopus Agile prices endpoint is public (unauthenticated) and returns real UK market data. The consumption endpoint requires authentication with the user's actual meter credentials. In demo mode we have no real meter, so consumption must be synthetic.
+The UK Carbon Intensity API returns a snapshot of the current grid mix. Historical data is not meaningful for the fuel mix pie chart, so a 15-minute in-memory cache is sufficient. Adding Room persistence would add complexity without benefit.
+
+### Why is the flexible price cached in DataStore instead of Room?
+
+The flexible price is a single `Double` value (the current rate), not a time series. DataStore is the natural home for simple key-value preferences. The 30-day TTL prevents stale prices from persisting indefinitely.
 
 ## Component Reference
 
 | Component | File | Role |
 |-----------|------|------|
 | `OctopusApiService` | `data/remote/api/OctopusApiService.kt` | Retrofit interface for Octopus REST API |
-| `OctopusRepositoryImpl` | `data/repository/OctopusRepositoryImpl.kt` | Central orchestrator: routes observe/refresh between demo and real paths |
-| `DemoDataGenerator` | `core/util/DemoDataGenerator.kt` | Pure generator for synthetic consumption, prices, standing charges |
-| `DemoCacheStore` | `data/local/DemoCacheStore.kt` | In-memory `@Singleton` cache with `MutableStateFlow` lists |
-| Room Database | `data/local/OctopusDatabase.kt` | Persistent cache for real data (agile_prices, consumption, standing_charges tables) |
-| `UserPreferencesRepository` | `data/prefs/UserPreferencesRepository.kt` | DataStore-based preferences; source of `hasCredentials` flow |
+| `CarbonIntensityApiService` | `data/remote/api/CarbonIntensityApiService.kt` | Retrofit interface for UK Carbon Intensity API (`https://api.carbonintensity.org.uk/`) |
+| `OctopusRepositoryImpl` | `data/repository/OctopusRepositoryImpl.kt` | Central orchestrator: delegates to unified cache stores, builds HalfHourPoints |
+| `GreenEnergyRepositoryImpl` | `data/repository/GreenEnergyRepositoryImpl.kt` | Fetches grid generation mix with 15-min in-memory cache |
+| `OctopusRepositoryImpl` (agile prices) | `data/repository/OctopusRepositoryImpl.kt` | Agile price management — in-memory StateFlow + Room, synthetic demo or real public API |
+| `ConsumptionCacheStore` | `data/local/ConsumptionCacheStore.kt` | Unified consumption cache — synthetic demo or real authenticated API, backed by Room + in-memory StateFlow |
+| `StandingChargeCacheStore` | `data/local/StandingChargeCacheStore.kt` | Unified standing charge cache — always real public API, backed by Room + in-memory StateFlow |
+| `DemoDataGenerator` | `core/util/DemoDataGenerator.kt` | Pure generator for synthetic consumption + price entities |
+| `DemoCacheStore` | `data/local/DemoCacheStore.kt` | **No-op placeholder** — consumption migrated to `ConsumptionCacheStore`, standing charges to `StandingChargeCacheStore` |
+| Room Database | `data/local/OctopusDatabase.kt` | Persistent cache (agile_prices, consumption, standing_charges tables) |
+| `UserPreferencesRepository` | `data/prefs/UserPreferencesRepository.kt` | DataStore-based preferences; source of `isDemoMode`, `hasCredentials`, flexible price cache, thresholds |
 | `SecureApiKeyStore` | `data/prefs/SecureApiKeyStore.kt` | EncryptedSharedPreferences wrapper for the API key |
 | `AuthInterceptor` | `core/network/AuthInterceptor.kt` | OkHttp interceptor; adds Basic auth only to meter/consumption endpoints |
-| `DashboardViewModel` | `ui/dashboard/DashboardViewModel.kt` | Observes dashboard data, manages range selection and UI state |
-| `HomeViewModel` | `ui/home/HomeViewModel.kt` | Observes current Agile prices and grid carbon intensity |
-| `FuturePricesViewModel` | `ui/future/FuturePricesViewModel.kt` | Observes upcoming Agile prices |
+| `GetDashboardDataUseCase` | `domain/usecase/GetDashboardDataUseCase.kt` | Returns combined prices + consumption Flow as HalfHourPoints |
+| `RefreshDashboardDataUseCase` | `domain/usecase/RefreshDashboardDataUseCase.kt` | Parallel refresh of prices (required) + consumption + standing charges (optional) |
+| `DashboardViewModel` | `ui/dashboard/DashboardViewModel.kt` | Observes dashboard data, manages range selection, computes cost/usage stats and zone breakdown |
+| `HomeViewModel` | `ui/home/HomeViewModel.kt` | Observes current Agile prices, flexible price, and green energy data |
+| `FuturePricesViewModel` | `ui/future/FuturePricesViewModel.kt` | Observes upcoming Agile prices with infinite scroll-back support |
 | `SettingsViewModel` | `ui/settings/SettingsViewModel.kt` | Manages credential input and save/test flow |

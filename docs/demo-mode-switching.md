@@ -48,7 +48,7 @@ There is no "switch to real mode" command. The mode flips implicitly the moment 
 
 | Cache | What gets wiped |
 |---|---|
-| `AgilePriceCacheStore` | In-memory `MutableStateFlow` + Room `agile_price` table |
+| Agile prices (OctopusRepositoryImpl) | In-memory `MutableStateFlow` + Room `agile_prices` table |
 | `ConsumptionCacheStore` | In-memory flow + Room `consumption` table |
 | `StandingChargeCacheStore` | In-memory flow + Room `standing_charge` table |
 
@@ -72,16 +72,23 @@ This ensures no stale data from the previous mode flashes on screen.
 
 Cache stores are **not reactive** to mode changes. Each method checks `preferencesRepository.isDemoMode.first()` at call time (point-in-time read, not a subscription).
 
-### AgilePriceCacheStore (`data/local/AgilePriceCacheStore.kt:81-104`)
+### Agile Prices (`OctopusRepositoryImpl`, managed inline)
 
 ```
-loadRange(start, end):
+loadAgilePrices(start, end):
   isDemo? ──yes──→ DemoDataGenerator.generateAgilePriceEntities(start, end)
-              │     → write to Room → mergeAndEmit()
+              │     → write to Room → mergeAndEmitAgilePrices()
               │
               no──→ read from Room
                     → if empty, fetch from Octopus public API (no auth needed)
-                    → mergeAndEmit()
+                    → mergeAndEmitAgilePrices()
+
+refreshAgilePrices(start, end):
+  isDemo? ──yes──→ DemoDataGenerator.generateAgilePriceEntities(start, end)   ← NO API CALL
+              │     → write to Room → mergeAndEmitAgilePrices()
+              │
+              no──→ fetch from Octopus public API → write to Room
+                    → read from Room → mergeAndEmitAgilePrices()
 ```
 
 ### ConsumptionCacheStore (`data/local/ConsumptionCacheStore.kt:78+`)
