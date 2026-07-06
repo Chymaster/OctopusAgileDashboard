@@ -2,6 +2,7 @@ package com.chymaster.octopusagiledashboard.ui.home
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.chymaster.octopusagiledashboard.data.local.AgilePriceCacheStore
 import com.chymaster.octopusagiledashboard.data.prefs.UserPreferencesRepository
 import com.chymaster.octopusagiledashboard.data.repository.GreenEnergyRepository
 import com.chymaster.octopusagiledashboard.data.repository.OctopusRepository
@@ -42,7 +43,8 @@ data class HomeUiState(
 class HomeViewModel @Inject constructor(
     private val repository: OctopusRepository,
     private val greenEnergyRepository: GreenEnergyRepository,
-    private val preferencesRepository: UserPreferencesRepository
+    private val preferencesRepository: UserPreferencesRepository,
+    private val agilePriceCacheStore: AgilePriceCacheStore
 ) : ViewModel() {
 
     private val londonZone = ZoneId.of("Europe/London")
@@ -60,6 +62,15 @@ class HomeViewModel @Inject constructor(
         }
         refreshJob = loadAllData()
         startGreenEnergyRefreshLoop()
+
+        // App-open background refresh: fetch future prices so the Future Prices
+        // screen has data ready when the user navigates to it.
+        viewModelScope.launch {
+            val now = Instant.now()
+            val futureEnd = now.atZone(londonZone).toLocalDate()
+                .plusDays(2).atStartOfDay(londonZone).toInstant()
+            agilePriceCacheStore.refreshFromApi(now, futureEnd)
+        }
 
         // Observe threshold preferences
         viewModelScope.launch {
