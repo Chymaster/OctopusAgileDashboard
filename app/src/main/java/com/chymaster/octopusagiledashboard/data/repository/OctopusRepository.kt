@@ -24,11 +24,11 @@ interface OctopusRepository {
     suspend fun refreshStandingCharges(start: Instant, end: Instant): Result<Unit>
 
     /**
-     * Wipe every cached entity from the local Room database. Called on every
-     * credential flip (demo ↔ real) so stale data from the previous state
-     * does not flash on the chart after the switch.
+     * Wipe both the in-memory demo cache and the persistent Room cache.
+     * Called on every credential save so no stale data from the previous
+     * mode (demo or real) flashes on the next observation.
      */
-    suspend fun purgeAllUserData()
+    suspend fun wipeAllCaches()
 
     suspend fun fetchMeterGsp(mpan: String): Result<String>
 

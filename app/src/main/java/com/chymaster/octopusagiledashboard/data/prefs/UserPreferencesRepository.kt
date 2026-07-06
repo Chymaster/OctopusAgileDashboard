@@ -10,7 +10,9 @@ import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.chymaster.octopusagiledashboard.core.util.Constants
+import com.chymaster.octopusagiledashboard.data.repository.OctopusRepository
 import com.chymaster.octopusagiledashboard.domain.model.TariffConfig
+import dagger.Lazy
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
@@ -25,7 +27,8 @@ private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(
 @Singleton
 class UserPreferencesRepository @Inject constructor(
     @param:ApplicationContext private val context: Context,
-    private val secureApiKeyStore: SecureApiKeyStore
+    private val secureApiKeyStore: SecureApiKeyStore,
+    private val octopusRepository: Lazy<OctopusRepository>
 ) {
 
     private val dataStore = context.dataStore
@@ -158,5 +161,8 @@ class UserPreferencesRepository @Inject constructor(
             prefs[GSP] = gsp
             prefs[PRODUCT_CODE] = productCode
         }
+        // Wipe both caches after credential change so no stale data from
+        // the previous mode (demo or real) flashes on the next observation.
+        octopusRepository.get().wipeAllCaches()
     }
 }
