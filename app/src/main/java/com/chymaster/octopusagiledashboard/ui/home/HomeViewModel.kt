@@ -61,15 +61,6 @@ class HomeViewModel @Inject constructor(
         refreshJob = loadAllData()
         startGreenEnergyRefreshLoop()
 
-        // App-open background refresh: fetch future prices so the Future Prices
-        // screen has data ready when the user navigates to it.
-        viewModelScope.launch {
-            val now = Instant.now()
-            val futureEnd = now.atZone(londonZone).toLocalDate()
-                .plusDays(2).atStartOfDay(londonZone).toInstant()
-            repository.refreshAgilePrices(now, futureEnd)
-        }
-
         // Observe threshold preferences
         viewModelScope.launch {
             preferencesRepository.cheapThresholdPercentFlow.collect { percent ->

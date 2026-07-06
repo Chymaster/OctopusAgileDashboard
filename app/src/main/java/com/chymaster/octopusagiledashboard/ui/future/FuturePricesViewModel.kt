@@ -100,38 +100,23 @@ class FuturePricesViewModel @Inject constructor(
 
             // Observe prices from repository — the range dynamically expands
             // when loadedStartDay changes (via loadOlderPrices or jumpToDate).
-            launch {
-                _uiState
-                    .flatMapLatest { state ->
-                        val startDay = state.loadedStartDay ?: now.minusDays(2)
-                        val startInstant = startDay.atStartOfDay(londonZone).toInstant()
-                        repository.observeAgilePrices(startInstant, futureEnd)
-                    }
-                    .distinctUntilChanged()
-                    .collectLatest { prices ->
-                        _uiState.update {
-                            it.copy(
-                                isLoading = false,
-                                isRefreshing = false,
-                                prices = prices.sortedBy { p -> p.validFrom },
-                                error = null
-                            )
-                        }
-                    }
-            }
-
-            // Background refresh from API
-            launch {
-                val result = repository.refreshAgilePrices(initialStart, futureEnd)
-                if (result.isFailure && _uiState.value.prices.isEmpty()) {
+            _uiState
+                .flatMapLatest { state ->
+                    val startDay = state.loadedStartDay ?: now.minusDays(2)
+                    val startInstant = startDay.atStartOfDay(londonZone).toInstant()
+                    repository.observeAgilePrices(startInstant, futureEnd)
+                }
+                .distinctUntilChanged()
+                .collectLatest { prices ->
                     _uiState.update {
                         it.copy(
+                            isLoading = false,
                             isRefreshing = false,
-                            error = result.exceptionOrNull()?.message ?: "Failed to load prices"
+                            prices = prices.sortedBy { p -> p.validFrom },
+                            error = null
                         )
                     }
                 }
-            }
         }
     }
 
