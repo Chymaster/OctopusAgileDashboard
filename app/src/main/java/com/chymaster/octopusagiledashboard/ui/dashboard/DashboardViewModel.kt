@@ -90,7 +90,7 @@ class DashboardViewModel @Inject constructor(
     init {
         viewModelScope.launch {
             preferencesRepository.hasCredentials.collect { hasCreds ->
-                _uiState.update { it.copy(hasCredentials = hasCreds) }
+                _uiState.update { it.copy(hasCredentials = hasCreds, isDemoMode = !hasCreds) }
                 // Cache wipe is handled by the repository (via
                 // UserPreferencesRepository.saveCredentials) and the
                 // observe* methods use transformLatest to react to
@@ -205,7 +205,6 @@ class DashboardViewModel @Inject constructor(
     private fun loadData(range: DateRangeSelection): Job {
         return viewModelScope.launch {
             val (start, end) = getDateRange(range)
-            val hasCreds = _uiState.value.hasCredentials
 
             // Demo seeding is handled by the repository's observe* methods
             // (auto-seed when DemoCacheStore is empty).
@@ -215,7 +214,7 @@ class DashboardViewModel @Inject constructor(
                     isLoading = it.points.isEmpty(),
                     error = null,
                     selectedRange = range,
-                    isDemoMode = !hasCreds,
+                    // isDemoMode is set by the hasCredentials collector
                     // Show placeholder points immediately so the chart renders
                     // the time range even before data arrives.
                     displayChartPoints = it.chartPoints.ifEmpty {
