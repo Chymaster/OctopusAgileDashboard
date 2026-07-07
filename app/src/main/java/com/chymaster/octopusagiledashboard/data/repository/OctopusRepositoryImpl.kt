@@ -172,6 +172,16 @@ class OctopusRepositoryImpl @Inject constructor(
      */
     override suspend fun getAgilePrices(start: Instant, end: Instant): List<AgilePrice> {
         return withContext(Dispatchers.IO) {
+            // Demo mode → generate synthetic prices, persist, return.
+            val isDemo = preferencesRepository.isDemoMode.first()
+            if (isDemo) {
+                val tariffCode = preferencesRepository.tariffConfig.first().tariffCode
+                val generated = DemoDataGenerator.generateAgilePriceEntities(start, end, tariffCode)
+                agilePriceDao.insertAll(generated)
+                mergeAndEmitAgilePrices(generated, start, end)
+                return@withContext generated.map { it.toDomain() }
+            }
+
             // Fast path: in-memory cache already covers the range
             val currentStart = cachedPricesStart
             val currentEnd = cachedPricesEnd
