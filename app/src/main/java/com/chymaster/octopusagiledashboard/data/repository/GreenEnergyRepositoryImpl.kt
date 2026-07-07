@@ -55,6 +55,8 @@ class GreenEnergyRepositoryImpl @Inject constructor(
                 } else {
                     Result.failure(Exception("API error: ${response.code()} ${response.message()}"))
                 }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Exception) {
                 // Return stale cache if available, otherwise propagate error
                 cachedData?.let { return@withContext Result.success(it) }

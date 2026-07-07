@@ -17,6 +17,7 @@ import java.time.temporal.ChronoUnit
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -222,7 +223,10 @@ class DashboardViewModel @Inject constructor(
                 // Refresh prices and standing charges in the background.
                 // Consumption auto-loads via the dashboard flow observation.
                 val refreshResult = refreshDashboardDataUseCase(start, end)
-                if (refreshResult.isFailure && _uiState.value.points.isEmpty()) {
+                // Guard against setting stale errors on a cancelled coroutine —
+                // the CancellationException rethrow in fetchAndPersist* should
+                // prevent this, but this check is defence-in-depth.
+                if (refreshResult.isFailure && _uiState.value.points.isEmpty() && coroutineContext.isActive) {
                     _uiState.update {
                         it.copy(error = refreshResult.exceptionOrNull()?.message ?: "Failed to refresh")
                     }
