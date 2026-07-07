@@ -1,5 +1,8 @@
 package com.chymaster.octopusagiledashboard.ui.nav
 
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
@@ -32,7 +35,8 @@ fun AppNavGraph(
     preferencesRepository: UserPreferencesRepository,
     navController: NavHostController
 ) {
-    val hasCredentials by preferencesRepository.hasCredentials.collectAsState(initial = false)
+    val isDemoMode by preferencesRepository.isDemoMode.collectAsState(initial = true)
+    val hasCredentials = !isDemoMode
     val scope = rememberCoroutineScope()
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val currentBackStackEntry by navController.currentBackStackEntryAsState()
@@ -44,11 +48,15 @@ fun AppNavGraph(
         drawerContent = {
             DrawerContent(
                 currentRoute = currentRoute,
-                hasCredentials = hasCredentials,
+                isDemoMode = isDemoMode,
                 onNavigate = { route ->
                     navController.navigate(route) {
-                        // Avoid stacking duplicate destinations
                         launchSingleTop = true
+                        // When returning to Home, pop the entire back stack to avoid
+                        // decomposing + recomposing Home (which causes a white flash).
+                        if (route == Routes.HOME) {
+                            popUpTo(Routes.HOME) { inclusive = true }
+                        }
                     }
                 },
                 onCloseDrawer = { scope.launch { drawerState.close() } }
@@ -67,33 +75,53 @@ fun AppNavGraph(
                 }
         ) {
             NavHost(navController = navController, startDestination = Routes.HOME) {
-                composable(Routes.HOME) {
+                composable(
+                    Routes.HOME,
+                    enterTransition = { fadeIn(tween(200)) },
+                    exitTransition = { fadeOut(tween(200)) }
+                ) {
                     HomeScreen(
                         onOpenDrawer = { scope.launch { drawerState.open() } },
                         onOpenSettings = { navController.navigate(Routes.SETTINGS) }
                     )
                 }
-                composable(Routes.DASHBOARD) {
+                composable(
+                    Routes.DASHBOARD,
+                    enterTransition = { fadeIn(tween(200)) },
+                    exitTransition = { fadeOut(tween(200)) }
+                ) {
                     DashboardScreen(
                         onOpenSettings = { navController.navigate(Routes.SETTINGS) },
                         onOpenFuturePrices = { navController.navigate(Routes.FUTURE_PRICES) },
                         onOpenDrawer = { scope.launch { drawerState.open() } }
                     )
                 }
-                composable(Routes.FUTURE_PRICES) {
+                composable(
+                    Routes.FUTURE_PRICES,
+                    enterTransition = { fadeIn(tween(200)) },
+                    exitTransition = { fadeOut(tween(200)) }
+                ) {
                     FuturePricesScreen(
                         onBack = { navController.popBackStack() },
                         onOpenDrawer = { scope.launch { drawerState.open() } }
                     )
                 }
-                composable(Routes.SETTINGS) {
+                composable(
+                    Routes.SETTINGS,
+                    enterTransition = { fadeIn(tween(200)) },
+                    exitTransition = { fadeOut(tween(200)) }
+                ) {
                     SettingsScreen(
                         onNavigateBack = { navController.popBackStack() },
                         showBackButton = true,
                         onNavigateToAdvancedSettings = { navController.navigate(Routes.ADVANCED_SETTINGS) }
                     )
                 }
-                composable(Routes.ADVANCED_SETTINGS) {
+                composable(
+                    Routes.ADVANCED_SETTINGS,
+                    enterTransition = { fadeIn(tween(200)) },
+                    exitTransition = { fadeOut(tween(200)) }
+                ) {
                     AdvancedSettingsScreen(
                         onBack = { navController.popBackStack() }
                     )

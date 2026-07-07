@@ -11,7 +11,7 @@ class RefreshDashboardDataUseCase @Inject constructor(
 ) {
     suspend operator fun invoke(start: Instant, end: Instant): Result<Unit> {
         return coroutineScope {
-            val pricesResult = async { repository.refreshAgilePrices(start, end) }
+            val pricesResult = async { repository.getAgilePrices(start, end) }
             val consumptionResult = async { repository.refreshConsumption(start, end) }
             val standingChargesResult = async { repository.refreshStandingCharges(start, end) }
 
@@ -20,9 +20,9 @@ class RefreshDashboardDataUseCase @Inject constructor(
             consumptionResult.await()
             standingChargesResult.await()
 
-            // Prices are required; consumption and standing charges are optional
-            if (prices.isFailure) {
-                Result.failure(prices.exceptionOrNull() ?: Exception("Failed to refresh prices"))
+            // Prices are required; empty list means failure
+            if (prices.isEmpty()) {
+                Result.failure(Exception("Failed to load prices"))
             } else {
                 Result.success(Unit)
             }

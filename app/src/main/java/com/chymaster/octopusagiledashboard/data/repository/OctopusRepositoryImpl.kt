@@ -1,12 +1,9 @@
 package com.chymaster.octopusagiledashboard.data.repository
 
 import com.chymaster.octopusagiledashboard.core.util.Constants
-import com.chymaster.octopusagiledashboard.core.util.DemoDataGenerator
-import com.chymaster.octopusagiledashboard.core.util.DemoIdentifiers
-import com.chymaster.octopusagiledashboard.data.local.DemoCacheStore
+import com.chymaster.octopusagiledashboard.data.local.ConsumptionCacheStore
+import com.chymaster.octopusagiledashboard.data.local.StandingChargeCacheStore
 import com.chymaster.octopusagiledashboard.data.local.dao.AgilePriceDao
-import com.chymaster.octopusagiledashboard.data.local.dao.ConsumptionDao
-import com.chymaster.octopusagiledashboard.data.local.dao.StandingChargeDao
 import com.chymaster.octopusagiledashboard.data.local.entity.AgilePriceEntity
 import com.chymaster.octopusagiledashboard.data.local.entity.ConsumptionEntity
 import com.chymaster.octopusagiledashboard.data.mapper.toDomain
@@ -22,15 +19,15 @@ import com.chymaster.octopusagiledashboard.domain.model.StandingCharge
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
+import retrofit2.Response
 import java.time.Instant
 import java.time.OffsetDateTime
 import java.time.format.DateTimeFormatter
@@ -41,243 +38,148 @@ import javax.inject.Singleton
 @Singleton
 class OctopusRepositoryImpl @Inject constructor(
     private val apiService: OctopusApiService,
-    private val agilePriceDao: AgilePriceDao,
-    private val consumptionDao: ConsumptionDao,
-    private val standingChargeDao: StandingChargeDao,
     private val preferencesRepository: UserPreferencesRepository,
-    private val demoCacheStore: DemoCacheStore
+    private val agilePriceDao: AgilePriceDao,
+    private val consumptionCacheStore: ConsumptionCacheStore,
+    private val standingChargeCacheStore: StandingChargeCacheStore
 ) : OctopusRepository {
 
-    override fun observeAgilePrices(start: Instant, end: Instant): Flow<List<AgilePrice>> = flow {
-        // Room is the source of truth for the Home / Future Prices timelines
-        // regardless of credential state. The public Agile prices endpoint is
-        // unauthenticated, so the Home screen shows real public prices even
-        // in demo mode. In demo mode, [refreshAgilePrices] writes the public
-        // API result to Room (with the demo tariff code) so this observation
-        // sees the same data.
-        emitAll(
-            agilePriceDao.observeRange(start.toEpochMilli(), end.toEpochMilli())
-                .map { entities -> entities.map { it.toDomain() } }
-        )
-    }.flowOn(Dispatchers.IO)
+    // ── Agile price in-memory cache ─────────────────────────────────
 
-    override fun observeConsumption(start: Instant, end: Instant): Flow<List<ConsumptionRecord>> = flow {
-        if (isDemoMode()) {
-            // Demo: filter the in-memory cache by range. All demo rows share
-            // the sentinel MPAN so no per-MPAN filter is needed.
-            val startMs = start.toEpochMilli()
-            val endMs = end.toEpochMilli()
-            emitAll(
-                demoCacheStore.consumption
-                    .map { all -> all.filter { it.intervalStart in startMs until endMs } }
-                    .map { entities -> entities.map { it.toDomain() } }
-            )
-        } else {
-            val mpan = preferencesRepository.mpanFlow.first() ?: ""
-            emitAll(
-                consumptionDao.observeRange(mpan, start.toEpochMilli(), end.toEpochMilli())
-                    .map { entities -> entities.map { it.toDomain() } }
-            )
-        }
-    }.flowOn(Dispatchers.IO)
+    private val _agilePrices = MutableStateFlow<List<AgilePriceEntity>>(emptyList())
+
+    /** Earliest instant covered by the current agile price cache. */
+    @Volatile
+    private var cachedPricesStart: Instant? = null
+
+    /** Latest instant covered by the current agile price cache. */
+    @Volatile
+    private var cachedPricesEnd: Instant? = null
+
+    // ── Flexible price in-memory cache ─────────────────────────────
+
+    private var cachedFlexiblePrice: Double? = null
+    private var cachedFlexiblePriceTime: Instant? = null
+
+    companion object {
+        /** 7 days — TTL for the flexible price in-memory cache. */
+        private const val FLEXIBLE_CACHE_TTL_SECONDS = 7L * 24 * 3600
+    }
+
+    // ── Public API: observe ──────────────────────────────────────────
+
+    override fun observeAgilePrices(start: Instant, end: Instant): Flow<List<AgilePrice>> {
+        val startMs = start.toEpochMilli()
+        val endMs = end.toEpochMilli()
+        return _agilePrices
+            .map { entities ->
+                entities
+                    .filter { it.validFrom >= startMs && it.validTo <= endMs }
+                    .map { it.toDomain() }
+            }
+            .flowOn(Dispatchers.IO)
+    }
+
+    override fun observeAgilePriceEntities(start: Instant, end: Instant): Flow<List<AgilePriceEntity>> {
+        val startMs = start.toEpochMilli()
+        val endMs = end.toEpochMilli()
+        return _agilePrices
+            .map { entities ->
+                entities.filter { it.validFrom >= startMs && it.validTo <= endMs }
+            }
+            .flowOn(Dispatchers.IO)
+    }
+
+    override fun observeConsumption(start: Instant, end: Instant): Flow<List<ConsumptionRecord>> =
+        consumptionCacheStore.observeRange(start, end)
+            .flowOn(Dispatchers.IO)
 
     override fun observeDashboardData(start: Instant, end: Instant): Flow<List<HalfHourPoint>> {
-        return flow {
-            if (isDemoMode()) {
-                // Demo: combine the in-memory price and consumption flows through
-                // the same HalfHourPoint construction as the real path. The
-                // combine lambda is identical; only the source of the upstream
-                // flows differs.
-                val startMs = start.toEpochMilli()
-                val endMs = end.toEpochMilli()
-                val pricesFlow = demoCacheStore.prices
-                    .map { all -> all.filter { it.validFrom >= startMs && it.validTo <= endMs } }
-                    .distinctUntilChanged()
-                val consumptionFlow = demoCacheStore.consumption
-                    .map { all -> all.filter { it.intervalStart in startMs until endMs } }
-                    .distinctUntilChanged()
+        val pricesFlow = observeAgilePriceEntities(start, end)
+            .distinctUntilChanged()
 
-                var emittedOnce = false
-                emitAll(
-                    combine(pricesFlow, consumptionFlow) { prices, consumption ->
-                        buildHalfHourPoints(prices, consumption)
-                    }.debounce {
-                        // First emission (cached data) passes through immediately.
-                        // Subsequent emissions (from API refresh) are debounced so
-                        // the seed-then-refresh sequence settles into a single UI
-                        // update — this is what eliminates the flicker.
-                        if (emittedOnce) 1000L else {
-                            emittedOnce = true
-                            0L
-                        }
-                    }
-                )
-            } else {
-                val mpan = preferencesRepository.mpanFlow.first() ?: ""
-                val pricesFlow = agilePriceDao.observeRange(start.toEpochMilli(), end.toEpochMilli())
-                    .distinctUntilChanged()
-                val consumptionFlow = consumptionDao.observeRange(mpan, start.toEpochMilli(), end.toEpochMilli())
-                    .distinctUntilChanged()
+        val consumptionFlow = consumptionCacheStore.observeRangeEntities(start, end)
+            .distinctUntilChanged()
 
-                var emittedOnce = false
-                emitAll(
-                    combine(pricesFlow, consumptionFlow) { prices, consumption ->
-                        buildHalfHourPoints(prices, consumption)
-                    }.debounce {
-                        if (emittedOnce) 1000L else {
-                            emittedOnce = true
-                            0L
-                        }
-                    }
-                )
+        var emittedOnce = false
+        return combine(pricesFlow, consumptionFlow) { prices, consumption ->
+            buildHalfHourPoints(prices, consumption)
+        }.debounce {
+            if (emittedOnce) 1000L else {
+                emittedOnce = true
+                0L
             }
         }.flowOn(Dispatchers.IO)
     }
 
-    override fun observeStandingCharges(start: Instant, end: Instant): Flow<List<StandingCharge>> = flow {
-        if (isDemoMode()) {
-            // Demo: a single synthetic entity covers any query range (validTo is
-            // 10 years from "now"). The entity is the same regardless of [start]
-            // and [end], so no range filter is applied at the observe layer.
-            emitAll(
-                demoCacheStore.standingCharges
-                    .map { entities -> entities.map { it.toDomain() } }
-            )
-        } else {
-            emitAll(
-                standingChargeDao.observeRange(start.toEpochMilli(), end.toEpochMilli())
-                    .map { entities -> entities.map { it.toDomain() } }
-            )
-        }
-    }.flowOn(Dispatchers.IO)
+    override fun observeStandingCharges(start: Instant, end: Instant): Flow<List<StandingCharge>> =
+        standingChargeCacheStore.observeRange(start, end)
+            .flowOn(Dispatchers.IO)
 
-    override suspend fun refreshStandingCharges(start: Instant, end: Instant): Result<Unit> {
+    // ── Public API: get ─────────────────────────────────────────────
+
+    /**
+     * Get agile prices for [start]..[end].
+     *
+     * 1. If the in-memory cache already covers the full range, return immediately.
+     * 2. Otherwise query Room.
+     * 3. If Room is empty for this range, fetch from the API, persist to Room,
+     *    then query Room again.
+     * 4. Merge results into the in-memory cache.
+     */
+    override suspend fun getAgilePrices(start: Instant, end: Instant): List<AgilePrice> {
         return withContext(Dispatchers.IO) {
-            try {
-                if (isDemoMode()) {
-                    // Demo: the synthetic standing charge is fixed (50p/day). We
-                    // still re-seed it on refresh so the StateFlow re-emits, but
-                    // the value is the same.
-                    demoCacheStore.overwriteStandingCharges(
-                        listOf(DemoDataGenerator.generateStandingChargeEntity(Instant.now()))
-                    )
-                    Result.success(Unit)
-                } else {
-                    val tariffConfig = preferencesRepository.tariffConfig.first()
-                    val startStr = DateTimeFormatter.ISO_INSTANT.format(start)
-                    val endStr = DateTimeFormatter.ISO_INSTANT.format(end)
-                    val response = apiService.getStandingCharges(
-                        product = tariffConfig.productCode,
-                        tariff = tariffConfig.tariffCode,
-                        periodFrom = startStr,
-                        periodTo = endStr
-                    )
-                    if (response.isSuccessful) {
-                        val body = response.body()
-                            ?: return@withContext Result.failure(Exception("Empty response"))
-                        val entities = body.results.map { it.toEntity(tariffConfig.tariffCode) }
-                        standingChargeDao.insertAll(entities)
-                        Result.success(Unit)
-                    } else {
-                        Result.failure(Exception("API error: ${response.code()} ${response.message()}"))
-                    }
-                }
-            } catch (e: Exception) {
-                Result.failure(e)
+            // Fast path: in-memory cache already covers the range
+            val currentStart = cachedPricesStart
+            val currentEnd = cachedPricesEnd
+            if (currentStart != null && currentEnd != null &&
+                !start.isBefore(currentStart) && !end.isAfter(currentEnd)
+            ) {
+                val cached = _agilePrices.value
+                    .filter { it.validFrom >= start.toEpochMilli() && it.validTo <= end.toEpochMilli() }
+                return@withContext cached.map { it.toDomain() }
             }
+
+            // Query Room
+            val roomEntities = agilePriceDao.queryRange(start.toEpochMilli(), end.toEpochMilli())
+            val entities = if (roomEntities.isEmpty()) {
+                // Room empty — fetch from API, persist, query again
+                val apiResult = fetchAndPersistAgilePrices(start, end)
+                if (apiResult.isSuccess) {
+                    agilePriceDao.queryRange(start.toEpochMilli(), end.toEpochMilli())
+                } else {
+                    emptyList()
+                }
+            } else {
+                roomEntities
+            }
+
+            mergeAndEmitAgilePrices(entities, start, end)
+            entities.map { it.toDomain() }
         }
     }
 
-    override suspend fun refreshAgilePrices(start: Instant, end: Instant): Result<Unit> {
-        return withContext(Dispatchers.IO) {
-            try {
-                val tariffConfig = preferencesRepository.tariffConfig.first()
-                val startStr = DateTimeFormatter.ISO_INSTANT.format(start)
-                val endStr = DateTimeFormatter.ISO_INSTANT.format(end)
-                val allRates = fetchAllPages { url ->
-                    if (url != null) apiService.getAgileRatesByUrl(url)
-                    else apiService.getAgileRates(
-                        product = tariffConfig.productCode,
-                        tariff = tariffConfig.tariffCode,
-                        periodFrom = startStr,
-                        periodTo = endStr
-                    )
-                }
-
-                if (isDemoMode()) {
-                    // Demo: write the public API result to BOTH the in-memory
-                    // demo cache (so the Dashboard's observeDashboardData sees
-                    // the fresh real prices) AND to Room (so the Home /
-                    // Future Prices timelines continue to show real public
-                    // prices via observeAgilePrices, which always reads from
-                    // Room). The tariff code is the demo sentinel so the
-                    // real-mode refresh's INSERT REPLACE will overwrite these
-                    // rows by primary key when the user adds credentials.
-                    val entities = allRates.map { it.toEntity(DemoIdentifiers.TARIFF) }
-                    demoCacheStore.overwritePrices(entities)
-                    agilePriceDao.insertAll(entities)
-                    Result.success(Unit)
-                } else {
-                    // Insert with REPLACE strategy — no delete-first, avoids flash of empty data
-                    val entities = allRates.map { it.toEntity(tariffConfig.tariffCode) }
-                    agilePriceDao.insertAll(entities)
-                    preferencesRepository.saveLastPricesRefresh(System.currentTimeMillis())
-                    Result.success(Unit)
-                }
-            } catch (e: Exception) {
-                Result.failure(e)
-            }
-        }
+    override suspend fun refreshStandingCharges(start: Instant, end: Instant): Result<Unit> {
+        return standingChargeCacheStore.refreshFromApi(start, end)
     }
 
     override suspend fun refreshConsumption(start: Instant, end: Instant): Result<Unit> {
-        return withContext(Dispatchers.IO) {
-            try {
-                if (isDemoMode()) {
-                    // Demo: consumption is already seeded by the ViewModel
-                    // before the first observation, and is deterministic per
-                    // slot. Nothing to do on refresh — the data is already
-                    // correct.
-                    Result.success(Unit)
-                } else {
-                    val mpan = preferencesRepository.mpanFlow.first()
-                        ?: return@withContext Result.failure(Exception("MPAN not configured"))
-                    val serial = preferencesRepository.serialNumberFlow.first()
-                        ?: return@withContext Result.failure(Exception("Serial number not configured"))
-                    val startStr = DateTimeFormatter.ISO_INSTANT.format(start)
-                    val endStr = DateTimeFormatter.ISO_INSTANT.format(end)
-                    val response = apiService.getConsumption(
-                        mpan = mpan,
-                        serial = serial,
-                        periodFrom = startStr,
-                        periodTo = endStr
-                    )
-                    if (response.isSuccessful) {
-                        val body = response.body()
-                            ?: return@withContext Result.failure(Exception("Empty response"))
-                        val entities = body.results.map { it.toEntity(mpan, serial) }
-                        consumptionDao.insertAll(entities)
-                        preferencesRepository.saveLastConsumptionRefresh(System.currentTimeMillis())
-                        Result.success(Unit)
-                    } else {
-                        Result.failure(Exception("API error: ${response.code()} ${response.message()}"))
-                    }
-                }
-            } catch (e: Exception) {
-                Result.failure(e)
-            }
-        }
+        return consumptionCacheStore.refreshFromApi(start, end)
     }
 
-    override suspend fun purgeAllUserData() {
+    override suspend fun wipeAllCaches() {
         withContext(Dispatchers.IO) {
-            // Wipe every cached entity from the local Room database. Called on
-            // a real → demo credential flip so the user does not see a flash
-            // of the previous user's data on the freshly-minted demo chart.
-            // The in-memory demo store is wiped separately by the ViewModel.
+            // Clear agile price in-memory cache + Room
+            _agilePrices.value = emptyList()
+            cachedPricesStart = null
+            cachedPricesEnd = null
             agilePriceDao.deleteAll()
-            consumptionDao.deleteAll()
-            standingChargeDao.deleteAll()
+            // Clear flexible price cache
+            cachedFlexiblePrice = null
+            cachedFlexiblePriceTime = null
+            // Clear other cache stores
+            consumptionCacheStore.clear()
+            standingChargeCacheStore.clear()
         }
     }
 
@@ -300,6 +202,15 @@ class OctopusRepositoryImpl @Inject constructor(
 
     override suspend fun fetchFlexiblePrice(): Result<Double> {
         return withContext(Dispatchers.IO) {
+            // Return cached value if still fresh (7-day TTL)
+            val cached = cachedFlexiblePrice
+            val cachedTime = cachedFlexiblePriceTime
+            if (cached != null && cachedTime != null &&
+                java.time.Instant.now().epochSecond - cachedTime.epochSecond < FLEXIBLE_CACHE_TTL_SECONDS
+            ) {
+                return@withContext Result.success(cached)
+            }
+
             try {
                 val gsp = preferencesRepository.gspFlow.first()
                     ?: Constants.DEFAULT_GSP
@@ -355,6 +266,8 @@ class OctopusRepositoryImpl @Inject constructor(
                     }
 
                     if (current != null) {
+                        cachedFlexiblePrice = current.valueIncVat
+                        cachedFlexiblePriceTime = java.time.Instant.now()
                         return@withContext Result.success(current.valueIncVat)
                     }
                 }
@@ -386,18 +299,6 @@ class OctopusRepositoryImpl @Inject constructor(
     }
 
     /**
-     * True when no Octopus credentials are configured. The repository's
-     * `observe*` and `refresh*` methods use this to route demo traffic
-     * through [demoCacheStore] and real traffic through Room + the API.
-     *
-     * Read once per call (via [kotlinx.coroutines.flow.first]) so a single
-     * observe or refresh sees a stable credential state for its lifetime —
-     * subsequent credential flips are handled by the ViewModel cancelling
-     * the in-flight pipeline and relaunching.
-     */
-    private suspend fun isDemoMode(): Boolean = !preferencesRepository.hasCredentials.first()
-
-    /**
      * Combine a list of [AgilePriceEntity] with a list of [ConsumptionEntity]
      * into the [HalfHourPoint]s the chart expects. Always start from prices
      * and merge in the matching consumption row by `intervalStart` (== price
@@ -420,8 +321,78 @@ class OctopusRepositoryImpl @Inject constructor(
         }
     }
 
-    private suspend fun fetchAllPages(
-        request: suspend (url: String?) -> retrofit2.Response<PaginatedResponse<AgileRateDto>>
+    // ── Agile price private helpers ──────────────────────────────────
+
+    /**
+     * Merge [newEntities] into the in-memory agile price cache, expanding the tracked range.
+     * Deduplicates by `validFrom` (primary key), preferring newer entries.
+     */
+    private fun mergeAndEmitAgilePrices(
+        newEntities: List<AgilePriceEntity>,
+        requestedStart: Instant,
+        requestedEnd: Instant
+    ) {
+        if (newEntities.isEmpty()) {
+            cachedPricesStart = minOf(cachedPricesStart ?: requestedStart, requestedStart)
+            cachedPricesEnd = maxOf(cachedPricesEnd ?: requestedEnd, requestedEnd)
+            return
+        }
+
+        val existing = _agilePrices.value
+        val merged = if (existing.isEmpty()) {
+            newEntities.sortedBy { it.validFrom }
+        } else {
+            (existing + newEntities)
+                .associateBy { it.validFrom }  // dedup: last wins
+                .values
+                .sortedBy { it.validFrom }
+        }
+        _agilePrices.value = merged
+        cachedPricesStart = minOf(cachedPricesStart ?: requestedStart, requestedStart)
+        cachedPricesEnd = maxOf(cachedPricesEnd ?: requestedEnd, requestedEnd)
+    }
+
+    /**
+     * Fetch agile prices from the Octopus public API and insert into Room.
+     * Should NOT be called in demo mode — use [DemoDataGenerator] instead.
+     */
+    private suspend fun fetchAndPersistAgilePrices(start: Instant, end: Instant): Result<Unit> {
+        return try {
+            val allRates = fetchPublicAgilePrices(start, end)
+            val tariffCode = preferencesRepository.tariffConfig.first().tariffCode
+            val entities = allRates.map { it.toEntity(tariffCode) }
+            agilePriceDao.insertAll(entities)
+            preferencesRepository.saveLastPricesRefresh(System.currentTimeMillis())
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Fetch agile prices from the public (unauthenticated) Octopus endpoint.
+     * Follows pagination links to get all results.
+     */
+    private suspend fun fetchPublicAgilePrices(start: Instant, end: Instant): List<AgileRateDto> {
+        val tariffConfig = preferencesRepository.tariffConfig.first()
+        val startStr = DateTimeFormatter.ISO_INSTANT.format(start)
+        val endStr = DateTimeFormatter.ISO_INSTANT.format(end)
+        return fetchAllAgilePages { url ->
+            if (url != null) apiService.getAgileRatesByUrl(url)
+            else apiService.getAgileRates(
+                product = tariffConfig.productCode,
+                tariff = tariffConfig.tariffCode,
+                periodFrom = startStr,
+                periodTo = endStr
+            )
+        }
+    }
+
+    /**
+     * Follow pagination links from the Octopus API until all agile rate pages are fetched.
+     */
+    private suspend fun fetchAllAgilePages(
+        request: suspend (url: String?) -> Response<PaginatedResponse<AgileRateDto>>
     ): List<AgileRateDto> {
         val allRates = mutableListOf<AgileRateDto>()
         var url: String? = null
@@ -438,4 +409,5 @@ class OctopusRepositoryImpl @Inject constructor(
 
         return allRates
     }
+
 }
