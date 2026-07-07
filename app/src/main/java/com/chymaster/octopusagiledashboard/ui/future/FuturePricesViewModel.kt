@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.chymaster.octopusagiledashboard.data.prefs.UserPreferencesRepository
 import com.chymaster.octopusagiledashboard.data.repository.OctopusRepository
 import com.chymaster.octopusagiledashboard.domain.model.AgilePrice
+import com.chymaster.octopusagiledashboard.domain.model.toUserMessage
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
@@ -82,11 +83,15 @@ class FuturePricesViewModel @Inject constructor(
             val futureEnd = now.plusDays(2).atStartOfDay(londonZone).toInstant()
 
             // Load from repository (Room-first, API only if empty)
-            repository.getAgilePrices(initialStart, futureEnd)
+            repository.getAgilePrices(initialStart, futureEnd).onFailure { e ->
+                _uiState.update { it.copy(error = e.toUserMessage()) }
+            }
 
             // Fetch flexible price for colour thresholds (cached 7 days, API only if expired)
             repository.fetchFlexiblePrice().onSuccess { price ->
                 _uiState.update { it.copy(flexiblePrice = price) }
+            }.onFailure { e ->
+                android.util.Log.w("FuturePricesVM", "Failed to fetch flexible price", e)
             }
 
             _uiState.update { it.copy(loadedStartDay = now.minusDays(2)) }
@@ -129,7 +134,10 @@ class FuturePricesViewModel @Inject constructor(
             val endInstant = currentStart.atStartOfDay(londonZone).toInstant()
 
             // Single call: Room-first, API only if empty
-            repository.getAgilePrices(startInstant, endInstant)
+            repository.getAgilePrices(startInstant, endInstant).onFailure { e ->
+                _uiState.update { it.copy(isLoadingOlder = false) }
+                return@launch
+            }
 
             _uiState.update {
                 it.copy(
@@ -152,7 +160,10 @@ class FuturePricesViewModel @Inject constructor(
             val endInstant = date.plusDays(1).atStartOfDay(londonZone).toInstant()
 
             // Single call: Room-first, API only if empty
-            repository.getAgilePrices(startInstant, endInstant)
+            repository.getAgilePrices(startInstant, endInstant).onFailure { e ->
+                _uiState.update { it.copy(isRefreshing = false, error = e.toUserMessage()) }
+                return@launch
+            }
 
             // Expand loaded range if the date is before our current start
             val currentStart = _uiState.value.loadedStartDay
