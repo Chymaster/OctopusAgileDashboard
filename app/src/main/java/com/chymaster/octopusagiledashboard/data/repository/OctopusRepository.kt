@@ -26,22 +26,16 @@ interface OctopusRepository {
     fun observeStandingCharges(start: Instant, end: Instant): Flow<List<StandingCharge>>
 
     /**
-     * Load agile prices for [start]..[end] into the in-memory cache.
-     * In demo mode, generates synthetic data. In real mode, reads from Room.
+     * Get agile prices for [start]..[end].
+     * Checks in-memory cache first, then Room, then fetches from the API only
+     * if Room has no data for the requested range.
+     * Returns the list of prices (empty on failure).
      */
-    suspend fun loadAgilePrices(start: Instant, end: Instant)
-
-    suspend fun refreshAgilePrices(start: Instant, end: Instant): Result<Unit>
+    suspend fun getAgilePrices(start: Instant, end: Instant): List<AgilePrice>
 
     suspend fun refreshConsumption(start: Instant, end: Instant): Result<Unit>
 
     suspend fun refreshStandingCharges(start: Instant, end: Instant): Result<Unit>
-
-    /**
-     * Expand the cached agile price range backward by [additionalDays] days.
-     * Used by infinite scroll-up in the Future Prices screen.
-     */
-    suspend fun expandAgilePriceHistoryBackward(additionalDays: Int)
 
     /**
      * Wipe both the in-memory demo cache and the persistent Room cache.

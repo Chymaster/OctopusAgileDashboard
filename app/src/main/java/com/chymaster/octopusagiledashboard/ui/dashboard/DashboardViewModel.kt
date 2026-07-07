@@ -23,7 +23,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.drop
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.time.Instant
@@ -110,15 +109,6 @@ class DashboardViewModel @Inject constructor(
                 recomputeZoneBreakdown()
             }
         }
-        // Immediately show cached flexible price if available (and within TTL)
-        viewModelScope.launch {
-            val cachedPrice = preferencesRepository.cachedFlexiblePriceFlow.first()
-            val cachedTimestamp = preferencesRepository.cachedFlexiblePriceTimestampFlow.first()
-            if (cachedPrice != null && System.currentTimeMillis() - cachedTimestamp < FLEXIBLE_CACHE_TTL_MS) {
-                _uiState.update { it.copy(flexiblePrice = cachedPrice) }
-                recomputeZoneBreakdown()
-            }
-        }
         // Skip the initial emission — the hasCredentials collector above
         // handles the first loadData. Only react to actual range changes.
         viewModelScope.launch {
@@ -182,11 +172,6 @@ class DashboardViewModel @Inject constructor(
 
     fun clearError() {
         _uiState.update { it.copy(error = null) }
-    }
-
-    companion object {
-        /** 30 days in milliseconds — cache TTL for the flexible price. */
-        private const val FLEXIBLE_CACHE_TTL_MS = 30L * 24 * 60 * 60 * 1000
     }
 
     /**
