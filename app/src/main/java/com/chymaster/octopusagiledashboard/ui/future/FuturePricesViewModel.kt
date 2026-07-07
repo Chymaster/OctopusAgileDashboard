@@ -84,6 +84,11 @@ class FuturePricesViewModel @Inject constructor(
             // Load from repository (Room-first, API only if empty)
             repository.getAgilePrices(initialStart, futureEnd)
 
+            // Fetch flexible price for colour thresholds (cached 7 days, API only if expired)
+            repository.fetchFlexiblePrice().onSuccess { price ->
+                _uiState.update { it.copy(flexiblePrice = price) }
+            }
+
             _uiState.update { it.copy(loadedStartDay = now.minusDays(2)) }
 
             // Observe prices from repository — the range dynamically expands
