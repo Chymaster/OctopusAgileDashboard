@@ -101,6 +101,8 @@ class StandingChargeCacheStore @Inject constructor(
                 val entities = standingChargeDao.queryRange(start.toEpochMilli(), end.toEpochMilli())
                 mergeAndEmit(entities, start, end)
                 Result.success(Unit)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Result.failure(e)
             }
@@ -188,6 +190,8 @@ class StandingChargeCacheStore @Inject constructor(
             val entities = allCharges.map { it.toEntity(tariffCode) }
             standingChargeDao.insertAll(entities)
             Result.success(Unit)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             Result.failure(e)
         }

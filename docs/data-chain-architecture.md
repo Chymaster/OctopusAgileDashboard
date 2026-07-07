@@ -292,3 +292,161 @@ The flexible price is a single `Double` value (the current rate), not a time ser
 | `HomeViewModel` | `ui/home/HomeViewModel.kt` | Observes current Agile prices, flexible price, and green energy data |
 | `FuturePricesViewModel` | `ui/future/FuturePricesViewModel.kt` | Observes upcoming Agile prices with infinite scroll-back support |
 | `SettingsViewModel` | `ui/settings/SettingsViewModel.kt` | Manages credential input and save/test flow |
+
+## User-Triggered Data Flows
+
+This section traces the exact chain of API calls triggered by common user actions.
+
+### API Key Save (First-Time Setup)
+
+When the user enters API key + MPAN + serial number + GSP and taps **Save**:
+
+```
+SettingsScreen (Save button)
+    │
+    ▼
+SettingsViewModel.save()                                    ← line 122
+    │  validates GSP is not blank
+    ▼
+UserPreferencesRepository.saveCredentials()                 ← line 158
+    │  saves API key to SecureApiKeyStore (encrypted)
+    │  saves MPAN/serial/GSP/product to DataStore
+    │
+    ▼
+OctopusRepository.wipeAllCaches()                           ← line 170
+    │  clears in-memory StateFlows + Room tables
+    │  (agile prices, consumption, standing charges)
+    │
+    ▼
+isDemoMode Flow emits false                                 ← flips from true
+    │
+    ▼
+DashboardViewModel.init isDemoMode collector                ← line 91
+    │  cancels old dataJob, calls loadData()
+    ▼
+DashboardViewModel.loadData(selectedRange)                  ← line 186
+    │  default range: TWENTY_FOUR_HOURS
+    ├──────────────────────────────────────────┐
+    ▼ (observe)                                ▼ (background refresh)
+GetDashboardDataUseCase(start, end)    RefreshDashboardDataUseCase(start, end)
+    │ returns Flow of HalfHourPoints        │ fires 3 parallel calls:
+    │ from in-memory caches                 │
+    │                                       ├→ repository.getAgilePrices(start, end)
+    │                                       │    checks in-memory cache → Room → API
+    │                                       ├→ repository.refreshConsumption(start, end)
+    │                                       │    always calls Octopus Usage API
+    │                                       └→ repository.refreshStandingCharges(start, end)
+    │                                            always calls Octopus Standing Charge API
+    ▼
+UI auto-updates via StateFlow observation
+```
+
+**Key points:**
+- **No bulk historical fetch.** The default range is ~24 hours (yesterday midnight → tomorrow midnight, London time). The user must manually select a longer range (1M, 6M, 1Y) to fetch more history.
+- **All caches are wiped** on every credential save, not just the first time. This prevents stale data from the previous mode (demo or real) from flashing.
+- There is no explicit "first-time" detection — the chain is purely reactive via `isDemoMode` Flow.
+
+### Dashboard Refresh Button
+
+When the user taps the refresh icon or pulls to refresh on the Dashboard:
+
+```
+DashboardScreen
+    │  IconButton (TopAppBar) or PullToRefreshBox gesture
+    ▼
+DashboardViewModel.onRefresh()                              ← line 126
+    │  cancels any in-flight dataJob
+    │  computes (start, end) from currently selected range
+    │
+    ├──────────────────────────────────────────┐
+    ▼ (parallel)                               ▼ (parallel)
+RefreshDashboardDataUseCase(start, end)  repository.fetchFlexiblePrice()
+    │ fires 3 parallel calls:                  │ fetches current flexible tariff rate
+    │                                          │ cached in-memory (7-day TTL)
+    ├→ repository.getAgilePrices(start, end)    │ cached in DataStore (30-day TTL)
+    │    **cached** if in-memory cache covers   ▼
+    │    the range; otherwise Room → API       UI updates flexible price
+    │
+    ├→ repository.refreshConsumption(start, end)
+    │    **force refresh** — always calls API
+    │
+    └→ repository.refreshStandingCharges(start, end)
+         **force refresh** — always calls API
+```
+
+**Key points:**
+- **Time range = currently selected range.** If the user has "1M" selected, the refresh fetches the last 30 days.
+- **Consumption and standing charges are always force-refreshed** from the API — `refreshFromApi()` does not short-circuit based on cache state.
+- **Agile prices are cached** if the in-memory `StateFlow` already covers the requested range; otherwise they follow the Room → API path.
+
+### Dashboard Date Selector Change
+
+When the user changes the time range (e.g., 24H → 1M):
+
+```
+RangeSelector FilterChip tap
+    │
+    ▼
+DashboardViewModel.onRangeSelected(range)                   ← line 122
+    │  sets _selectedRange.value = range
+    ▼
+_selectedRange collector (drop first emission)              ← line 114
+    │  cancels in-flight dataJob
+    ▼
+DashboardViewModel.loadData(newRange)                       ← line 186
+    │
+    ├──────────────────────────────────────────┐
+    ▼ (observe)                                ▼ (background refresh)
+GetDashboardDataUseCase(start, end)    RefreshDashboardDataUseCase(start, end)
+    │ reads from in-memory caches              │ force refreshes from API
+    │                                          │ (same as refresh button above)
+    │  if caches empty for new range:          │
+    │  → shows placeholder points so           │
+    │    chart axis renders the range          │
+    ▼
+UI auto-updates when refresh writes to caches
+```
+
+**Key points:**
+- **A background refresh is always triggered**, even when the in-memory cache or Room already has data for the new range. There is no cache-coverage check before calling `refreshDashboardDataUseCase()`.
+- **Cached data appears immediately** from the in-memory StateFlow while the background refresh runs.
+- **Consumption and standing charges are always force-refreshed** from the API — `refreshFromApi()` does not short-circuit based on cache state.
+- **For agile prices**, `getAgilePrices()` does check: in-memory cache → Room → API (only if Room is empty for the range).
+
+### Consumption Gap-Filling Behavior
+
+The consumption data layer does **not** implement gap-filling. The logic is binary:
+
+```
+ConsumptionCacheStore.loadRange(start, end)                 ← line 68
+    │
+    ├── if in-memory cache already covers the range → no-op (return)
+    │
+    ├── if Room has ANY data for the range → use it as-is (no gap detection)
+    │
+    └── if Room is EMPTY for the range → fetch entire range from API
+
+ConsumptionCacheStore.refreshFromApi(start, end)            ← line 108
+    │
+    └── always fetches the FULL requested range from API (no gap detection)
+```
+
+**How the API is called:**
+
+The Octopus usage endpoint accepts a date range and returns half-hourly consumption records:
+
+```
+GET electricity-meter-points/{mpan}/meters/{serial}/consumption/
+    ?period_from={ISO instant}     e.g. "2026-06-07T00:00:00Z"
+    &period_to={ISO instant}       e.g. "2026-07-07T00:00:00Z"
+    &page_size=25000
+    &order_by=period
+```
+
+- **One logical request per range**, not one per half-hour block.
+- Pagination is handled by following `next` links until all pages are consumed (`fetchAllPages()`, line 250).
+- Room uses `OnConflictStrategy.REPLACE` on insert, so existing rows are overwritten atomically.
+
+**Implications:**
+- If Room has 20 out of 48 expected half-hour slots for a 24H range, `loadRange()` returns those 20 without fetching the missing 28. Only a manual refresh (`refreshFromApi()`) will fill the gaps.
+- `refreshFromApi()` always overwrites the full range, so partial data is never a concern after a refresh.
