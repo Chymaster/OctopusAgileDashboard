@@ -7,11 +7,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -32,6 +34,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -225,19 +228,28 @@ fun DashboardScreen(
                             // the selected time range is visible even before
                             // the Octopus usage API returns data.
                             if (uiState.displayChartPoints.isNotEmpty()) {
-                                when (chartGroup) {
-                                    ChartGroup.PRICE_USAGE -> PriceUsageChart(
-                                        points = uiState.displayChartPoints,
-                                        referencePrice = uiState.flexiblePrice,
-                                        onPointTapped = viewModel::onPointTapped,
-                                        modifier = Modifier.padding(horizontal = 8.dp)
-                                    )
-                                    ChartGroup.COST -> PriceLineChart(
-                                        points = uiState.displayChartPoints,
-                                        chartMode = ChartMode.COST,
-                                        onPointTapped = viewModel::onPointTapped,
-                                        modifier = Modifier.padding(horizontal = 8.dp)
-                                    )
+                                Box(modifier = Modifier.fillMaxWidth()) {
+                                    when (chartGroup) {
+                                        ChartGroup.PRICE_USAGE -> PriceUsageChart(
+                                            points = uiState.displayChartPoints,
+                                            referencePrice = uiState.flexiblePrice,
+                                            onPointTapped = viewModel::onPointTapped,
+                                            modifier = Modifier.padding(horizontal = 8.dp)
+                                        )
+                                        ChartGroup.COST -> PriceLineChart(
+                                            points = uiState.displayChartPoints,
+                                            chartMode = ChartMode.COST,
+                                            onPointTapped = viewModel::onPointTapped,
+                                            modifier = Modifier.padding(horizontal = 8.dp)
+                                        )
+                                    }
+                                    if (uiState.isChartLoading) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier
+                                                .align(Alignment.Center)
+                                                .size(40.dp)
+                                        )
+                                    }
                                 }
                             }
                         }
