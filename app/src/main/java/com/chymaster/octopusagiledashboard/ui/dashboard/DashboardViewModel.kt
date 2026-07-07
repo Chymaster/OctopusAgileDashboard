@@ -43,7 +43,7 @@ data class DashboardUiState(
      * usage API returns data.
      */
     val displayChartPoints: List<HalfHourPoint> = emptyList(),
-    val selectedRange: DateRangeSelection = DateRangeSelection.Preset(TimeRangePreset.SEVEN_DAYS),
+    val selectedRange: DateRangeSelection = DateRangeSelection.Preset(TimeRangePreset.TWENTY_FOUR_HOURS),
     val error: String? = null,
     val selectedBinnedPoint: BinnedPoint? = null,
     val hasCredentials: Boolean = false,
@@ -81,7 +81,7 @@ class DashboardViewModel @Inject constructor(
     val uiState: StateFlow<DashboardUiState> = _uiState.asStateFlow()
 
     private val _selectedRange = MutableStateFlow<DateRangeSelection>(
-        DateRangeSelection.Preset(TimeRangePreset.SEVEN_DAYS)
+        DateRangeSelection.Preset(TimeRangePreset.TWENTY_FOUR_HOURS)
     )
 
     private var dataJob: Job? = null
@@ -360,7 +360,7 @@ class DashboardViewModel @Inject constructor(
         return when (selection) {
             is DateRangeSelection.Preset -> {
                 val start = when (selection.preset) {
-                    TimeRangePreset.SEVEN_DAYS -> now.minusDays(7)
+                    TimeRangePreset.TWENTY_FOUR_HOURS -> now.minusDays(1)
                     TimeRangePreset.ONE_MONTH -> now.minusDays(30)
                     TimeRangePreset.SIX_MONTHS -> now.minusDays(182)
                     TimeRangePreset.ONE_YEAR -> now.minusDays(365)

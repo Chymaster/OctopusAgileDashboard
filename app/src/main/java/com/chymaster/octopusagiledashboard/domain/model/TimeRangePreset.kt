@@ -3,7 +3,7 @@ package com.chymaster.octopusagiledashboard.domain.model
 import java.time.LocalDate
 
 enum class TimeRangePreset(val label: String, val days: Long) {
-    SEVEN_DAYS("7D", 7),
+    TWENTY_FOUR_HOURS("24H", 1),
     ONE_MONTH("1M", 30),
     SIX_MONTHS("6M", 182),
     ONE_YEAR("1Y", 365)
