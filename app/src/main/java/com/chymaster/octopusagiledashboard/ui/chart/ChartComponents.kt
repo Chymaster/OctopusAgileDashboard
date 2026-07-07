@@ -2,10 +2,7 @@ package com.chymaster.octopusagiledashboard.ui.chart
 
 import androidx.compose.ui.graphics.Color
 import com.chymaster.octopusagiledashboard.domain.model.HalfHourPoint
-import com.patrykandpatrick.vico.compose.cartesian.data.CartesianValueFormatter
-import com.patrykandpatrick.vico.compose.cartesian.marker.DefaultCartesianMarker
 import java.time.Instant
-import java.time.Duration
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -42,24 +39,63 @@ fun List<HalfHourPoint>.trimMissingConsumption(): List<HalfHourPoint> {
 
 /**
  * Bins half-hour points into larger time intervals for compact chart display.
- * Chooses bin size based on the number of data points:
- *   ≤ 48  (1 day)    → no binning
- *   ≤ 168 (3.5 days) → 2-hour bins
- *   ≤ 720 (15 days)  → 6-hour bins
- *   ≤ 2000 (~6 weeks)→ 1-day bins
- *   > 2000            → 3-day bins
+ * Automatically picks the bin size that keeps bar count closest to 20 without
+ * exceeding it. If the raw count is already ≤ 20, no binning is performed.
  *
  * For each bin: price is averaged, consumption and cost are summed.
  */
 fun binPoints(points: List<HalfHourPoint>): List<BinnedPoint> {
     if (points.isEmpty()) return emptyList()
+    if (points.size <= 20) {
+        return points.map { BinnedPoint(it.intervalStart, it.intervalEnd, it.priceIncVat, it.consumptionKwh, it.costIncVat, 1) }
+    }
+    val binSeconds = optimalBinSeconds(points.size)
+    return binPoints(points, binSeconds)
+}
 
-    val binSeconds = when {
-        points.size <= 48 -> return points.map { BinnedPoint(it.intervalStart, it.intervalEnd, it.priceIncVat, it.consumptionKwh, it.costIncVat, 1) }
-        points.size <= 168 -> 2 * 3600L    // 2 hours
-        points.size <= 720 -> 6 * 3600L    // 6 hours
-        points.size <= 2000 -> 24 * 3600L  // 1 day
-        else -> 72 * 3600L                 // 3 days
+/**
+ * Available bin durations in ascending order (seconds).
+ */
+private val BIN_DURATIONS_SECONDS = longArrayOf(
+    1800L,          // 30m
+    3600L,          // 1h
+    7200L,          // 2h
+    14400L,         // 4h
+    43200L,         // 12h
+    86400L,         // 1d
+    259200L,        // 3d
+    604800L,        // 7d
+    1209600L,       // 14d
+    2592000L,       // 1M
+    5184000L,       // 2M
+    15724800L,      // 6M
+    31536000L,      // 1Y
+    63072000L,      // 2Y
+    157680000L,     // 5Y
+)
+
+/**
+ * Picks the smallest bin duration (in seconds) that brings the bar count
+ * at or below [targetBars] (default 20). Returns the raw half-hour interval
+ * (1800 s) if even that fits.
+ */
+fun optimalBinSeconds(pointCount: Int, targetBars: Int = 20): Long {
+    if (pointCount <= targetBars) return 1800L
+    val minBinHalfHours = (pointCount + targetBars - 1) / targetBars  // ceiling division
+    val minBinSeconds = minBinHalfHours * 1800L
+    return BIN_DURATIONS_SECONDS.firstOrNull { it >= minBinSeconds }
+        ?: BIN_DURATIONS_SECONDS.last()
+}
+
+/**
+ * Bins half-hour points using an explicit [binDurationSeconds] duration.
+ * If [binDurationSeconds] is less than or equal to the raw interval (1800 s),
+ * returns each point wrapped as a single-item [BinnedPoint].
+ */
+fun binPoints(points: List<HalfHourPoint>, binDurationSeconds: Long): List<BinnedPoint> {
+    if (points.isEmpty()) return emptyList()
+    if (binDurationSeconds <= 1800L) {
+        return points.map { BinnedPoint(it.intervalStart, it.intervalEnd, it.priceIncVat, it.consumptionKwh, it.costIncVat, 1) }
     }
 
     data class BinAccumulator(
@@ -74,7 +110,7 @@ fun binPoints(points: List<HalfHourPoint>): List<BinnedPoint> {
 
     for (point in points) {
         val epochSecond = point.intervalStart.epochSecond
-        val binKey = (epochSecond / binSeconds) * binSeconds
+        val binKey = (epochSecond / binDurationSeconds) * binDurationSeconds
         val bin = bins.getOrPut(binKey) { BinAccumulator(binKey) }
 
         point.priceIncVat?.let { bin.prices.add(it) }
@@ -85,7 +121,7 @@ fun binPoints(points: List<HalfHourPoint>): List<BinnedPoint> {
 
     return bins.values.map { bin ->
         val start = Instant.ofEpochSecond(bin.binStart)
-        val end = Instant.ofEpochSecond(bin.binStart + binSeconds)
+        val end = Instant.ofEpochSecond(bin.binStart + binDurationSeconds)
         BinnedPoint(
             intervalStart = start,
             intervalEnd = end,
@@ -97,69 +133,35 @@ fun binPoints(points: List<HalfHourPoint>): List<BinnedPoint> {
     }
 }
 
-object ChartFormatters {
-
-    private val londonZone = ZoneId.of("Europe/London")
-    private val timeFormatter = DateTimeFormatter.ofPattern("HH:mm", Locale.UK)
-    private val dateFormatter = DateTimeFormatter.ofPattern("dd/MM", Locale.UK)
-    private val dateTimeFormatter = DateTimeFormatter.ofPattern("dd/MM\nHH:mm", Locale.UK)
-
-    /**
-     * Creates a time axis formatter that maps sequential indices to actual times.
-     * Shows the date when the time crosses midnight (hour == 0).
-     * @param points the list of HalfHourPoint, used to resolve index → time
-     */
-    fun timeAxisFormatter(points: List<HalfHourPoint>): CartesianValueFormatter {
-        if (points.isEmpty()) {
-            return CartesianValueFormatter { _, _, _ -> " " }
-        }
-        return CartesianValueFormatter { _, value, _ ->
-            val index = value.toInt().coerceIn(0, points.size - 1)
-            val zoned = points[index].intervalStart.atZone(londonZone)
-            // Show date when crossing midnight (hour 0) or if previous point was on a different day
-            val showDate = zoned.hour == 0 || (index > 0 && run {
-                val prevZoned = points[index - 1].intervalStart.atZone(londonZone)
-                prevZoned.toLocalDate() != zoned.toLocalDate()
-            })
-            if (showDate) zoned.format(dateTimeFormatter) else zoned.format(timeFormatter)
-        }
+/**
+ * Formats a time label for a bin starting at [instant] with the given [binDurationSeconds].
+ * For sub-day bins, shows HH:mm (with dd/MM at midnight crossings).
+ * For day+ bins, always shows dd/MM.
+ */
+fun formatBinLabel(instant: Instant, binDurationSeconds: Long): String {
+    val londonZone = ZoneId.of("Europe/London")
+    val zoned = instant.atZone(londonZone)
+    return if (binDurationSeconds >= 24 * 3600L) {
+        zoned.format(DateTimeFormatter.ofPattern("dd/MM", Locale.UK))
+    } else {
+        zoned.format(DateTimeFormatter.ofPattern("HH:mm", Locale.UK))
     }
+}
 
-    val priceAxisFormatter = CartesianValueFormatter { _, value, _ ->
-        String.format(Locale.UK, "%.1f p", value)
-    }
-
-    val consumptionAxisFormatter = CartesianValueFormatter { _, value, _ ->
-        String.format(Locale.UK, "%.3f kWh", value)
-    }
-
-    val priceMarkerFormatter = DefaultCartesianMarker.ValueFormatter.default(suffix = " p/kWh")
-    val consumptionMarkerFormatter = DefaultCartesianMarker.ValueFormatter.default(suffix = " kWh")
-
-    /**
-     * Creates a time axis formatter for binned data.
-     * For sub-day bins, shows date at midnight crossings.
-     * For day+ bins, always shows the date.
-     */
-    fun binnedTimeAxisFormatter(binnedPoints: List<BinnedPoint>): CartesianValueFormatter {
-        if (binnedPoints.isEmpty()) {
-            return CartesianValueFormatter { _, _, _ -> " " }
-        }
-        val binDuration = Duration.between(binnedPoints[0].intervalStart, binnedPoints[0].intervalEnd)
-        val isDailyOrLarger = binDuration.toHours() >= 24
-        return CartesianValueFormatter { _, value, _ ->
-            val index = value.toInt().coerceIn(0, binnedPoints.size - 1)
-            val zoned = binnedPoints[index].intervalStart.atZone(londonZone)
-            if (isDailyOrLarger) {
-                zoned.format(dateFormatter)
-            } else {
-                val showDate = zoned.hour == 0 || (index > 0 && run {
-                    val prevZoned = binnedPoints[index - 1].intervalStart.atZone(londonZone)
-                    prevZoned.toLocalDate() != zoned.toLocalDate()
-                })
-                if (showDate) zoned.format(dateTimeFormatter) else zoned.format(timeFormatter)
-            }
-        }
+/**
+ * Formats a time label for a raw half-hour point, showing the date at midnight crossings.
+ */
+fun formatRawLabel(instant: Instant, prevInstant: Instant? = null): String {
+    val londonZone = ZoneId.of("Europe/London")
+    val zoned = instant.atZone(londonZone)
+    val showDate = zoned.hour == 0 || (prevInstant != null && run {
+        val prevZoned = prevInstant.atZone(londonZone)
+        prevZoned.toLocalDate() != zoned.toLocalDate()
+    })
+    return if (showDate) {
+        zoned.format(DateTimeFormatter.ofPattern("dd/MM\nHH:mm", Locale.UK))
+    } else {
+        zoned.format(DateTimeFormatter.ofPattern("HH:mm", Locale.UK))
     }
 }
 

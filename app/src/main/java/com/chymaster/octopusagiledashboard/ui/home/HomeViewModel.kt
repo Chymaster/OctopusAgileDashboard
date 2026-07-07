@@ -7,6 +7,7 @@ import com.chymaster.octopusagiledashboard.data.repository.GreenEnergyRepository
 import com.chymaster.octopusagiledashboard.data.repository.OctopusRepository
 import com.chymaster.octopusagiledashboard.domain.model.AgilePrice
 import com.chymaster.octopusagiledashboard.domain.model.GreenEnergyData
+import com.chymaster.octopusagiledashboard.domain.model.toUserMessage
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -30,6 +31,7 @@ data class HomeUiState(
     val currentPriceStartTime: Instant? = null,
     val priceTimeline: List<AgilePrice> = emptyList(),
     val flexiblePrice: Double? = null,
+    val flexiblePriceError: String? = null,
     val greenEnergyData: GreenEnergyData? = null,
     val cheapThresholdPercent: Int = 70,
     val moderateThresholdPercent: Int = 130,
@@ -78,6 +80,10 @@ class HomeViewModel @Inject constructor(
         refreshJob = loadAllData()
     }
 
+    fun clearFlexiblePriceError() {
+        _uiState.update { it.copy(flexiblePriceError = null) }
+    }
+
     private fun loadAllData(): Job {
         return viewModelScope.launch {
             _uiState.update { it.copy(isRefreshing = true, error = null) }
@@ -119,18 +125,20 @@ class HomeViewModel @Inject constructor(
                 }
 
                 // Collect results
-                val prices = pricesJob.await()
-                if (prices.isEmpty() && _uiState.value.priceTimeline.isEmpty()) {
-                    _uiState.update {
-                        it.copy(error = "Failed to load prices")
+                pricesJob.await().onFailure { e ->
+                    if (_uiState.value.priceTimeline.isEmpty()) {
+                        _uiState.update { it.copy(error = e.toUserMessage()) }
                     }
                 }
 
                 flexibleJob.await().onSuccess { price ->
-                    _uiState.update { it.copy(flexiblePrice = price) }
+                    _uiState.update { it.copy(flexiblePrice = price, flexiblePriceError = null) }
                     preferencesRepository.saveFlexiblePriceCache(price)
                 }.onFailure { e ->
                     android.util.Log.w("HomeViewModel", "Failed to fetch flexible price", e)
+                    _uiState.update {
+                        it.copy(flexiblePriceError = e.toUserMessage())
+                    }
                 }
 
                 greenJob.await().onSuccess { data ->
@@ -139,7 +147,7 @@ class HomeViewModel @Inject constructor(
                     // Green energy is non-critical; show silently if other data loaded
                     if (_uiState.value.priceTimeline.isEmpty()) {
                         _uiState.update {
-                            it.copy(error = e.message ?: "Failed to load grid data")
+                            it.copy(error = e.toUserMessage())
                         }
                     }
                 }
@@ -155,6 +163,11 @@ class HomeViewModel @Inject constructor(
                 delay(15 * 60 * 1000L) // 15 minutes
                 greenEnergyRepository.fetchGenerationMix().onSuccess { data ->
                     _uiState.update { it.copy(greenEnergyData = data) }
+                }.onFailure { e ->
+                    // Keep stale data on screen; the repository's stale-cache
+                    // fallback handles most cases, but if both API and cache
+                    // fail, just log and continue.
+                    android.util.Log.w("HomeViewModel", "Green energy refresh failed", e)
                 }
             }
         }

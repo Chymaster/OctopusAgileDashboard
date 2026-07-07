@@ -1,6 +1,7 @@
 package com.chymaster.octopusagiledashboard.data.repository
 
 import com.chymaster.octopusagiledashboard.data.remote.api.CarbonIntensityApiService
+import com.chymaster.octopusagiledashboard.domain.model.ApiError
 import com.chymaster.octopusagiledashboard.domain.model.FuelMix
 import com.chymaster.octopusagiledashboard.domain.model.GreenEnergyData
 import com.chymaster.octopusagiledashboard.domain.model.LOW_CARBON_FUELS
@@ -32,7 +33,7 @@ class GreenEnergyRepositoryImpl @Inject constructor(
                 val response = apiService.getGenerationMix()
                 if (response.isSuccessful) {
                     val body = response.body()
-                        ?: return@withContext Result.failure(Exception("Empty response"))
+                        ?: return@withContext Result.failure(ApiError.NoDataError("Empty response"))
 
                     val fuelMix = body.data.generationmix.map { entry ->
                         FuelMix(fuel = entry.fuel, percentage = entry.perc)
@@ -53,8 +54,17 @@ class GreenEnergyRepositoryImpl @Inject constructor(
                     cachedData = data
                     Result.success(data)
                 } else {
-                    Result.failure(Exception("API error: ${response.code()} ${response.message()}"))
+                    Result.failure(ApiError.fromHttpCode(response.code()))
                 }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: ApiError) {
+                // Return stale cache if available, otherwise propagate error
+                cachedData?.let { return@withContext Result.success(it) }
+                Result.failure(e)
+            } catch (e: java.io.IOException) {
+                cachedData?.let { return@withContext Result.success(it) }
+                Result.failure(ApiError.NetworkError(cause = e))
             } catch (e: Exception) {
                 // Return stale cache if available, otherwise propagate error
                 cachedData?.let { return@withContext Result.success(it) }

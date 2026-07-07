@@ -12,20 +12,19 @@ class RefreshDashboardDataUseCase @Inject constructor(
     suspend operator fun invoke(start: Instant, end: Instant): Result<Unit> {
         return coroutineScope {
             val pricesResult = async { repository.getAgilePrices(start, end) }
-            val consumptionResult = async { repository.refreshConsumption(start, end) }
             val standingChargesResult = async { repository.refreshStandingCharges(start, end) }
 
             val prices = pricesResult.await()
-            // Consumption and standing charges are optional — don't fail if they error
-            consumptionResult.await()
+            // Standing charges are optional — don't fail if they error
             standingChargesResult.await()
 
-            // Prices are required; empty list means failure
-            if (prices.isEmpty()) {
-                Result.failure(Exception("Failed to load prices"))
-            } else {
-                Result.success(Unit)
-            }
+            // Propagate the repository's error (e.g. ApiError.Unauthorized,
+            // ApiError.NetworkError) rather than inventing a generic message.
+            // A successful call returning an empty list is NOT an error.
+            prices.fold(
+                onSuccess = { Result.success(Unit) },
+                onFailure = { Result.failure(it) }
+            )
         }
     }
 }
