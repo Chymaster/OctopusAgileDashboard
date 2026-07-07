@@ -202,8 +202,9 @@ class DashboardViewModel @Inject constructor(
             }
 
             coroutineScope {
-                // Observe the dashboard flow. The unified cache stores
-                // handle demo/real branching internally.
+                // Observe the dashboard flow. The cache stores
+                // automatically trigger getConsumption when collected,
+                // handling demo/real branching and gap detection internally.
                 launch {
                     getDashboardDataUseCase(start, end).collectLatest { points ->
                         updateDashboardWithPoints(points, start, end)
@@ -211,8 +212,6 @@ class DashboardViewModel @Inject constructor(
                 }
 
                 // Observe standing charges and compute the standing charge cost.
-                // The repository returns the synthetic demo entity when in
-                // demo mode, so this code is identical for both paths.
                 launch {
                     repository.observeStandingCharges(start, end).collectLatest { charges ->
                         _uiState.update { it.copy(standingChargeCost = computeStandingChargeCost(charges, start, end)) }
@@ -220,10 +219,8 @@ class DashboardViewModel @Inject constructor(
                     }
                 }
 
-                // Refresh in the background. The observation flows will
-                // auto-update when the refresh writes to the demo store or
-                // Room. In demo mode the seeded data stays visible even if
-                // the public API refresh fails.
+                // Refresh prices and standing charges in the background.
+                // Consumption auto-loads via the dashboard flow observation.
                 val refreshResult = refreshDashboardDataUseCase(start, end)
                 if (refreshResult.isFailure && _uiState.value.points.isEmpty()) {
                     _uiState.update {

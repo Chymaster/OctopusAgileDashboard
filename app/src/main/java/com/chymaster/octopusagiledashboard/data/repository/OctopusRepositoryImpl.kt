@@ -163,8 +163,10 @@ class OctopusRepositoryImpl @Inject constructor(
         return standingChargeCacheStore.refreshFromApi(start, end)
     }
 
-    override suspend fun refreshConsumption(start: Instant, end: Instant): Result<Unit> {
-        return consumptionCacheStore.refreshFromApi(start, end)
+    override suspend fun getConsumption(start: Instant, end: Instant): List<ConsumptionRecord> {
+        return withContext(Dispatchers.IO) {
+            consumptionCacheStore.getConsumption(start, end).map { it.toDomain() }
+        }
     }
 
     override suspend fun wipeAllCaches() {

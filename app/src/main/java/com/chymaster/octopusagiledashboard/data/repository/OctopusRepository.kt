@@ -33,7 +33,7 @@ interface OctopusRepository {
      */
     suspend fun getAgilePrices(start: Instant, end: Instant): List<AgilePrice>
 
-    suspend fun refreshConsumption(start: Instant, end: Instant): Result<Unit>
+    suspend fun getConsumption(start: Instant, end: Instant): List<ConsumptionRecord>
 
     suspend fun refreshStandingCharges(start: Instant, end: Instant): Result<Unit>
 

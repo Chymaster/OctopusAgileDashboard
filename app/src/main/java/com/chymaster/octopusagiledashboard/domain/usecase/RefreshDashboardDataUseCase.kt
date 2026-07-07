@@ -12,12 +12,10 @@ class RefreshDashboardDataUseCase @Inject constructor(
     suspend operator fun invoke(start: Instant, end: Instant): Result<Unit> {
         return coroutineScope {
             val pricesResult = async { repository.getAgilePrices(start, end) }
-            val consumptionResult = async { repository.refreshConsumption(start, end) }
             val standingChargesResult = async { repository.refreshStandingCharges(start, end) }
 
             val prices = pricesResult.await()
-            // Consumption and standing charges are optional — don't fail if they error
-            consumptionResult.await()
+            // Standing charges are optional — don't fail if they error
             standingChargesResult.await()
 
             // Prices are required; empty list means failure

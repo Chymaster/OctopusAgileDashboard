@@ -17,6 +17,9 @@ interface ConsumptionDao {
     @Query("SELECT * FROM consumption WHERE mpan = :mpan AND intervalStart >= :startMillis AND intervalStart < :endMillis ORDER BY intervalStart ASC")
     suspend fun queryRange(mpan: String, startMillis: Long, endMillis: Long): List<ConsumptionEntity>
 
+    @Query("SELECT COUNT(*) FROM consumption WHERE mpan = :mpan AND intervalStart >= :startMillis AND intervalStart < :endMillis")
+    suspend fun countInRange(mpan: String, startMillis: Long, endMillis: Long): Int
+
     @Query("DELETE FROM consumption WHERE mpan = :mpan AND intervalStart >= :startMillis AND intervalStart < :endMillis")
     suspend fun deleteRange(mpan: String, startMillis: Long, endMillis: Long)
 
