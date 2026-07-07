@@ -56,6 +56,16 @@ class OctopusRepositoryImpl @Inject constructor(
     @Volatile
     private var cachedPricesEnd: Instant? = null
 
+    // ── Flexible price in-memory cache ─────────────────────────────
+
+    private var cachedFlexiblePrice: Double? = null
+    private var cachedFlexiblePriceTime: Instant? = null
+
+    companion object {
+        /** 7 days — TTL for the flexible price in-memory cache. */
+        private const val FLEXIBLE_CACHE_TTL_SECONDS = 7L * 24 * 3600
+    }
+
     // ── Public API: observe ──────────────────────────────────────────
 
     override fun observeAgilePrices(start: Instant, end: Instant): Flow<List<AgilePrice>> {
@@ -106,84 +116,46 @@ class OctopusRepositoryImpl @Inject constructor(
         standingChargeCacheStore.observeRange(start, end)
             .flowOn(Dispatchers.IO)
 
-    // ── Public API: load / refresh / expand ──────────────────────────
+    // ── Public API: get ─────────────────────────────────────────────
 
     /**
-     * Load agile prices for [start]..[end] into the in-memory cache.
-     * Reads from Room first; if empty, fetches from the public Octopus API.
-     * If the requested range is already fully covered, this is a no-op.
+     * Get agile prices for [start]..[end].
+     *
+     * 1. If the in-memory cache already covers the full range, return immediately.
+     * 2. Otherwise query Room.
+     * 3. If Room is empty for this range, fetch from the API, persist to Room,
+     *    then query Room again.
+     * 4. Merge results into the in-memory cache.
      */
-    override suspend fun loadAgilePrices(start: Instant, end: Instant) {
-        val currentStart = cachedPricesStart
-        val currentEnd = cachedPricesEnd
-        if (currentStart != null && currentEnd != null &&
-            !start.isBefore(currentStart) && !end.isAfter(currentEnd)
-        ) {
-            return // already covered
-        }
-
-        val roomEntities = agilePriceDao.queryRange(start.toEpochMilli(), end.toEpochMilli())
-        val entities = if (roomEntities.isEmpty()) {
-            val apiResult = fetchAndPersistAgilePrices(start, end)
-            if (apiResult.isSuccess) {
-                agilePriceDao.queryRange(start.toEpochMilli(), end.toEpochMilli())
-            } else {
-                emptyList()
-            }
-        } else {
-            roomEntities
-        }
-
-        mergeAndEmitAgilePrices(entities, start, end)
-    }
-
-    /**
-     * Fetch fresh agile prices from the public Octopus API,
-     * persist to Room, and reload the in-memory cache.
-     */
-    override suspend fun refreshAgilePrices(start: Instant, end: Instant): Result<Unit> {
+    override suspend fun getAgilePrices(start: Instant, end: Instant): List<AgilePrice> {
         return withContext(Dispatchers.IO) {
-            try {
-                val result = fetchAndPersistAgilePrices(start, end)
-                if (result.isFailure) {
-                    return@withContext result
+            // Fast path: in-memory cache already covers the range
+            val currentStart = cachedPricesStart
+            val currentEnd = cachedPricesEnd
+            if (currentStart != null && currentEnd != null &&
+                !start.isBefore(currentStart) && !end.isAfter(currentEnd)
+            ) {
+                val cached = _agilePrices.value
+                    .filter { it.validFrom >= start.toEpochMilli() && it.validTo <= end.toEpochMilli() }
+                return@withContext cached.map { it.toDomain() }
+            }
+
+            // Query Room
+            val roomEntities = agilePriceDao.queryRange(start.toEpochMilli(), end.toEpochMilli())
+            val entities = if (roomEntities.isEmpty()) {
+                // Room empty — fetch from API, persist, query again
+                val apiResult = fetchAndPersistAgilePrices(start, end)
+                if (apiResult.isSuccess) {
+                    agilePriceDao.queryRange(start.toEpochMilli(), end.toEpochMilli())
+                } else {
+                    emptyList()
                 }
-                val entities = agilePriceDao.queryRange(start.toEpochMilli(), end.toEpochMilli())
-                mergeAndEmitAgilePrices(entities, start, end)
-                Result.success(Unit)
-            } catch (e: Exception) {
-                Result.failure(e)
-            }
-        }
-    }
-
-    /**
-     * Expand the cached agile price range backward by [additionalDays] days.
-     * Used by infinite scroll-up in the Future Prices screen.
-     * Reads from Room first; if empty, fetches from the public Octopus API.
-     */
-    override suspend fun expandAgilePriceHistoryBackward(additionalDays: Int) {
-        val currentStart = cachedPricesStart ?: return
-        val newStart = currentStart.minusSeconds(additionalDays.toLong() * 86400)
-
-        val roomEntities = agilePriceDao.queryRange(newStart.toEpochMilli(), currentStart.toEpochMilli())
-        val newEntities = if (roomEntities.isEmpty()) {
-            val apiResult = fetchAndPersistAgilePrices(newStart, currentStart)
-            if (apiResult.isSuccess) {
-                agilePriceDao.queryRange(newStart.toEpochMilli(), currentStart.toEpochMilli())
             } else {
-                emptyList()
+                roomEntities
             }
-        } else {
-            roomEntities
-        }
 
-        if (newEntities.isNotEmpty()) {
-            val merged = (newEntities + _agilePrices.value)
-                .distinctBy { it.validFrom }
-                .sortedBy { it.validFrom }
-            _agilePrices.value = merged
-            cachedPricesStart = newStart
+            mergeAndEmitAgilePrices(entities, start, end)
+            entities.map { it.toDomain() }
         }
     }
 
@@ -202,6 +174,9 @@ class OctopusRepositoryImpl @Inject constructor(
             cachedPricesStart = null
             cachedPricesEnd = null
             agilePriceDao.deleteAll()
+            // Clear flexible price cache
+            cachedFlexiblePrice = null
+            cachedFlexiblePriceTime = null
             // Clear other cache stores
             consumptionCacheStore.clear()
             standingChargeCacheStore.clear()
@@ -227,6 +202,15 @@ class OctopusRepositoryImpl @Inject constructor(
 
     override suspend fun fetchFlexiblePrice(): Result<Double> {
         return withContext(Dispatchers.IO) {
+            // Return cached value if still fresh (7-day TTL)
+            val cached = cachedFlexiblePrice
+            val cachedTime = cachedFlexiblePriceTime
+            if (cached != null && cachedTime != null &&
+                java.time.Instant.now().epochSecond - cachedTime.epochSecond < FLEXIBLE_CACHE_TTL_SECONDS
+            ) {
+                return@withContext Result.success(cached)
+            }
+
             try {
                 val gsp = preferencesRepository.gspFlow.first()
                     ?: Constants.DEFAULT_GSP
@@ -282,6 +266,8 @@ class OctopusRepositoryImpl @Inject constructor(
                     }
 
                     if (current != null) {
+                        cachedFlexiblePrice = current.valueIncVat
+                        cachedFlexiblePriceTime = java.time.Instant.now()
                         return@withContext Result.success(current.valueIncVat)
                     }
                 }

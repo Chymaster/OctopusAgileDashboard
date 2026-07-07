@@ -13,7 +13,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -52,10 +51,6 @@ class FuturePricesViewModel @Inject constructor(
 
     private var dataJob: Job? = null
 
-    companion object {
-        private const val FLEXIBLE_CACHE_TTL_MS = 30L * 24 * 60 * 60 * 1000
-    }
-
     init {
         dataJob = loadData()
 
@@ -81,20 +76,13 @@ class FuturePricesViewModel @Inject constructor(
         return viewModelScope.launch {
             _uiState.update { it.copy(isRefreshing = true, error = null) }
 
-            // Immediately show cached flexible price if available (and within TTL)
-            val cachedPrice = preferencesRepository.cachedFlexiblePriceFlow.first()
-            val cachedTimestamp = preferencesRepository.cachedFlexiblePriceTimestampFlow.first()
-            if (cachedPrice != null && System.currentTimeMillis() - cachedTimestamp < FLEXIBLE_CACHE_TTL_MS) {
-                _uiState.update { it.copy(flexiblePrice = cachedPrice) }
-            }
-
             val now = LocalDate.now(londonZone)
             // Default range: 2 days ago → 2 days ahead
             val initialStart = now.minusDays(2).atStartOfDay(londonZone).toInstant()
             val futureEnd = now.plusDays(2).atStartOfDay(londonZone).toInstant()
 
-            // Load from repository (handles demo/real internally)
-            repository.loadAgilePrices(initialStart, futureEnd)
+            // Load from repository (Room-first, API only if empty)
+            repository.getAgilePrices(initialStart, futureEnd)
 
             _uiState.update { it.copy(loadedStartDay = now.minusDays(2)) }
 
@@ -135,20 +123,8 @@ class FuturePricesViewModel @Inject constructor(
             val startInstant = newStart.atStartOfDay(londonZone).toInstant()
             val endInstant = currentStart.atStartOfDay(londonZone).toInstant()
 
-            // Check if there's any data in the cache for this range
-            val existingPrices = repository.observeAgilePrices(startInstant, endInstant).first()
-
-            if (existingPrices.isEmpty()) {
-                // Try fetching from API
-                val result = repository.refreshAgilePrices(startInstant, endInstant)
-                if (result.isFailure) {
-                    _uiState.update { it.copy(isLoadingOlder = false) }
-                    return@launch
-                }
-            }
-
-            // Expand the cache range backward
-            repository.expandAgilePriceHistoryBackward(1)
+            // Single call: Room-first, API only if empty
+            repository.getAgilePrices(startInstant, endInstant)
 
             _uiState.update {
                 it.copy(
@@ -170,21 +146,12 @@ class FuturePricesViewModel @Inject constructor(
             val startInstant = date.atStartOfDay(londonZone).toInstant()
             val endInstant = date.plusDays(1).atStartOfDay(londonZone).toInstant()
 
-            // Ensure data is loaded for the target date
-            repository.loadAgilePrices(startInstant, endInstant)
-
-            // If cache was empty, try API
-            val cached = repository.observeAgilePrices(startInstant, endInstant).first()
-            if (cached.isEmpty()) {
-                repository.refreshAgilePrices(startInstant, endInstant)
-            }
+            // Single call: Room-first, API only if empty
+            repository.getAgilePrices(startInstant, endInstant)
 
             // Expand loaded range if the date is before our current start
             val currentStart = _uiState.value.loadedStartDay
             if (currentStart == null || date < currentStart) {
-                repository.expandAgilePriceHistoryBackward(
-                    java.time.temporal.ChronoUnit.DAYS.between(date, currentStart ?: date).toInt()
-                )
                 _uiState.update { it.copy(loadedStartDay = date) }
             }
 

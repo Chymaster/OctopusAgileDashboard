@@ -16,7 +16,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.time.Instant
@@ -79,21 +78,9 @@ class HomeViewModel @Inject constructor(
         refreshJob = loadAllData()
     }
 
-    companion object {
-        /** 30 days in milliseconds — cache TTL for the flexible price. */
-        private const val FLEXIBLE_CACHE_TTL_MS = 30L * 24 * 60 * 60 * 1000
-    }
-
     private fun loadAllData(): Job {
         return viewModelScope.launch {
             _uiState.update { it.copy(isRefreshing = true, error = null) }
-
-            // Immediately show cached flexible price if available (and within TTL)
-            val cachedPrice = preferencesRepository.cachedFlexiblePriceFlow.first()
-            val cachedTimestamp = preferencesRepository.cachedFlexiblePriceTimestampFlow.first()
-            if (cachedPrice != null && System.currentTimeMillis() - cachedTimestamp < FLEXIBLE_CACHE_TTL_MS) {
-                _uiState.update { it.copy(flexiblePrice = cachedPrice) }
-            }
 
             // Calculate time window: 2 hours ago to 4 hours ahead
             val now = Instant.now()
@@ -119,10 +106,10 @@ class HomeViewModel @Inject constructor(
                 }
             }
 
-            // Refresh from API in background + fetch other data in parallel
+            // Fetch data in parallel
             coroutineScope {
                 val pricesJob = async {
-                    repository.refreshAgilePrices(start, end)
+                    repository.getAgilePrices(start, end)
                 }
                 val flexibleJob = async {
                     repository.fetchFlexiblePrice()
@@ -132,10 +119,10 @@ class HomeViewModel @Inject constructor(
                 }
 
                 // Collect results
-                val pricesResult = pricesJob.await()
-                if (pricesResult.isFailure && _uiState.value.priceTimeline.isEmpty()) {
+                val prices = pricesJob.await()
+                if (prices.isEmpty() && _uiState.value.priceTimeline.isEmpty()) {
                     _uiState.update {
-                        it.copy(error = pricesResult.exceptionOrNull()?.message ?: "Failed to load prices")
+                        it.copy(error = "Failed to load prices")
                     }
                 }
 
