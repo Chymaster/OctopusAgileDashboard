@@ -26,7 +26,9 @@ import com.chymaster.octopusagiledashboard.ui.dashboard.DashboardScreen
 import com.chymaster.octopusagiledashboard.ui.future.FuturePricesScreen
 import com.chymaster.octopusagiledashboard.ui.home.HomeScreen
 import com.chymaster.octopusagiledashboard.ui.settings.AdvancedSettingsScreen
+import com.chymaster.octopusagiledashboard.ui.settings.PriceThresholdsScreen
 import com.chymaster.octopusagiledashboard.ui.settings.SettingsScreen
+import com.chymaster.octopusagiledashboard.ui.settings.StatusScreen
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -123,6 +125,26 @@ fun AppNavGraph(
                     exitTransition = { fadeOut(tween(200)) }
                 ) {
                     AdvancedSettingsScreen(
+                        onBack = { navController.popBackStack() },
+                        onNavigateToPriceThresholds = { navController.navigate(Routes.PRICE_THRESHOLDS) },
+                        onNavigateToStatus = { navController.navigate(Routes.STATUS) }
+                    )
+                }
+                composable(
+                    Routes.PRICE_THRESHOLDS,
+                    enterTransition = { fadeIn(tween(200)) },
+                    exitTransition = { fadeOut(tween(200)) }
+                ) {
+                    PriceThresholdsScreen(
+                        onBack = { navController.popBackStack() }
+                    )
+                }
+                composable(
+                    Routes.STATUS,
+                    enterTransition = { fadeIn(tween(200)) },
+                    exitTransition = { fadeOut(tween(200)) }
+                ) {
+                    StatusScreen(
                         onBack = { navController.popBackStack() }
                     )
                 }
