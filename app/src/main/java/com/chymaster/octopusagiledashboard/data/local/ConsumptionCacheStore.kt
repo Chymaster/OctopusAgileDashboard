@@ -15,9 +15,11 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import retrofit2.Response
 import java.time.Instant
@@ -27,18 +29,17 @@ import javax.inject.Singleton
 
 /**
  * Dedicated cache store for half-hourly consumption data. This is the single
- * source of truth for all consumption data in the app, replacing the previous
- * split between [DemoCacheStore] (demo mode) and direct [ConsumptionDao]
- * reads (real mode).
+ * source of truth for all consumption data in the app.
  *
  * The store maintains an in-memory [StateFlow] of [ConsumptionEntity]s
- * covering the currently loaded time range. On [loadRange], it checks
- * whether the app is in demo mode and routes to either the Room database
- * (real mode) or the demo data generator (demo mode).
+ * covering the currently loaded time range. [getConsumption] is the single
+ * entry point for data access — it checks Room for completeness, detects
+ * gaps, and fetches missing blocks from the Octopus API (or generates demo
+ * data when in demo mode).
  *
- * [refreshFromApi] fetches fresh data from the Octopus Energy usage API
- * (real mode) or regenerates demo data (demo mode), writes it to Room,
- * and reloads the in-memory cache.
+ * The [observeRange] and [observeRangeEntities] methods return reactive
+ * [Flow]s that automatically trigger [getConsumption] when collected,
+ * ensuring the cache is always populated for the requested range.
  */
 @Singleton
 class ConsumptionCacheStore @Inject constructor(
@@ -60,105 +61,105 @@ class ConsumptionCacheStore @Inject constructor(
     @Volatile
     private var cachedEnd: Instant? = null
 
+    // ── Public API: get ─────────────────────────────────────────────
+
     /**
-     * Load consumption for [start]..[end] into the in-memory cache.
-     * In demo mode, generates synthetic data. In real mode, reads from Room.
-     * If the requested range is already fully covered, this is a no-op.
+     * Single entry point for consumption data. Guarantees [start]..[end] is
+     * fully populated in Room and the in-memory cache.
+     *
+     * 1. Demo mode → generate synthetic data, persist, return.
+     * 2. Real mode, all data present → return from Room.
+     * 3. Real mode, no data → fetch entire range from API.
+     * 4. Real mode, partial data → detect and fill gaps synchronously.
      */
-    suspend fun loadRange(start: Instant, end: Instant) {
-        val currentStart = cachedStart
-        val currentEnd = cachedEnd
-        if (currentStart != null && currentEnd != null &&
-            !start.isBefore(currentStart) && !end.isAfter(currentEnd)
-        ) {
-            return // already covered
+    suspend fun getConsumption(start: Instant, end: Instant): List<ConsumptionEntity> {
+        val isDemo = preferencesRepository.isDemoMode.first()
+        if (isDemo) {
+            val generated = DemoDataGenerator.generateConsumptionEntities(start, end)
+            consumptionDao.insertAll(generated)
+            mergeAndEmit(generated, start, end)
+            return generated
         }
 
-        val isDemo = preferencesRepository.isDemoMode.first()
-        val entities = if (isDemo) {
-            val generated = DemoDataGenerator.generateConsumptionEntities(start, end)
-            // Write to Room for persistence. The in-memory cache is updated
-            // via mergeAndEmit below.
-            consumptionDao.insertAll(generated)
-            generated
-        } else {
-            val mpan = preferencesRepository.mpanFlow.first() ?: ""
-            // Merge: load what Room has, then fill gaps from the API if needed.
-            val roomEntities = consumptionDao.queryRange(mpan, start.toEpochMilli(), end.toEpochMilli())
-            if (roomEntities.isEmpty()) {
-                // Nothing in Room for this range — try the API.
+        val mpan = preferencesRepository.mpanFlow.first() ?: ""
+        val startMs = start.toEpochMilli()
+        val endMs = end.toEpochMilli()
+        val expectedCount = ((endMs - startMs) / HALF_HOUR_MILLIS).toInt()
+
+        if (expectedCount <= 0) {
+            mergeAndEmit(emptyList(), start, end)
+            return emptyList()
+        }
+
+        val actualCount = consumptionDao.countInRange(mpan, startMs, endMs)
+
+        val entities = when {
+            actualCount >= expectedCount -> {
+                // All data present — read from Room.
+                consumptionDao.queryRange(mpan, startMs, endMs)
+            }
+            actualCount == 0 -> {
+                // Nothing in Room — fetch the entire range from the API.
                 val apiResult = fetchAndPersist(start, end)
                 if (apiResult.isSuccess) {
-                    consumptionDao.queryRange(mpan, start.toEpochMilli(), end.toEpochMilli())
+                    consumptionDao.queryRange(mpan, startMs, endMs)
                 } else {
                     emptyList()
                 }
-            } else {
-                roomEntities
+            }
+            else -> {
+                // Partial data — detect and fill gaps.
+                fillGaps(mpan, start, end)
+                consumptionDao.queryRange(mpan, startMs, endMs)
             }
         }
 
         mergeAndEmit(entities, start, end)
+        return entities
     }
 
-    /**
-     * Fetch consumption from the Octopus API for [start]..[end], persist to Room,
-     * and reload the in-memory cache. In demo mode, regenerates synthetic data.
-     */
-    suspend fun refreshFromApi(start: Instant, end: Instant): Result<Unit> {
-        return withContext(Dispatchers.IO) {
-            try {
-                val isDemo = preferencesRepository.isDemoMode.first()
-                if (isDemo) {
-                    val generated = DemoDataGenerator.generateConsumptionEntities(start, end)
-                    consumptionDao.insertAll(generated)
-                    mergeAndEmit(generated, start, end)
-                } else {
-                    val result = fetchAndPersist(start, end)
-                    if (result.isFailure) {
-                        return@withContext result
-                    }
-                    // Reload cache from Room to pick up the new data.
-                    val mpan = preferencesRepository.mpanFlow.first() ?: ""
-                    val entities = consumptionDao.queryRange(mpan, start.toEpochMilli(), end.toEpochMilli())
-                    mergeAndEmit(entities, start, end)
-                }
-                Result.success(Unit)
-            } catch (e: Exception) {
-                Result.failure(e)
-            }
-        }
-    }
+    // ── Public API: observe ─────────────────────────────────────────
 
     /**
-     * Observe consumption for [start]..[end] as domain [ConsumptionRecord] objects.
-     * Returns a filtered, mapped view of the in-memory cache.
+     * Observe consumption for [start]..[end] as domain [ConsumptionRecord]
+     * objects. Automatically triggers [getConsumption] when collected so the
+     * cache is populated for the requested range.
      */
-    fun observeRange(start: Instant, end: Instant): Flow<List<ConsumptionRecord>> {
+    fun observeRange(start: Instant, end: Instant): Flow<List<ConsumptionRecord>> = channelFlow {
         val startMs = start.toEpochMilli()
         val endMs = end.toEpochMilli()
-        return _consumption
+
+        // Trigger data loading in the background. This populates the
+        // in-memory StateFlow which the observation below reacts to.
+        launch(Dispatchers.IO) { getConsumption(start, end) }
+
+        _consumption
             .map { entities ->
                 entities
                     .filter { it.intervalStart >= startMs && it.intervalStart < endMs }
                     .map { it.toDomain() }
             }
-            .flowOn(Dispatchers.IO)
+            .collect { send(it) }
     }
 
     /**
-     * Observe consumption for [start]..[end] as raw [ConsumptionEntity] objects.
-     * Used internally by the repository for [buildHalfHourPoints] which
-     * needs entity-level access.
+     * Observe consumption for [start]..[end] as raw [ConsumptionEntity]
+     * objects. Automatically triggers [getConsumption] when collected so the
+     * cache is populated for the requested range.
      */
-    fun observeRangeEntities(start: Instant, end: Instant): Flow<List<ConsumptionEntity>> {
+    fun observeRangeEntities(start: Instant, end: Instant): Flow<List<ConsumptionEntity>> = channelFlow {
         val startMs = start.toEpochMilli()
         val endMs = end.toEpochMilli()
-        return _consumption
+
+        // Trigger data loading in the background. This populates the
+        // in-memory StateFlow which the observation below reacts to.
+        launch(Dispatchers.IO) { getConsumption(start, end) }
+
+        _consumption
             .map { entities ->
                 entities.filter { it.intervalStart >= startMs && it.intervalStart < endMs }
             }
-            .flowOn(Dispatchers.IO)
+            .collect { send(it) }
     }
 
     /**
@@ -173,6 +174,45 @@ class ConsumptionCacheStore @Inject constructor(
     }
 
     // ── Internal helpers ──────────────────────────────────────────────
+
+    /**
+     * Detect and fill gaps in Room data for [start]..[end].
+     * Identifies contiguous blocks of missing half-hour slots and fetches
+     * each block from the API synchronously (one at a time).
+     */
+    private suspend fun fillGaps(mpan: String, start: Instant, end: Instant) {
+        val startMs = start.toEpochMilli()
+        val endMs = end.toEpochMilli()
+
+        val existingSlots = consumptionDao.queryRange(mpan, startMs, endMs)
+            .map { it.intervalStart }
+            .toSet()
+
+        // Find contiguous missing blocks.
+        val gaps = mutableListOf<Pair<Instant, Instant>>()
+        var gapStart: Instant? = null
+        var t = start
+        while (!t.isAfter(end)) {
+            if (t.toEpochMilli() !in existingSlots) {
+                if (gapStart == null) gapStart = t
+            } else {
+                if (gapStart != null) {
+                    gaps.add(gapStart to t)
+                    gapStart = null
+                }
+            }
+            t = t.plusMillis(HALF_HOUR_MILLIS)
+        }
+        if (gapStart != null) {
+            gaps.add(gapStart to end)
+        }
+
+        // Fetch each gap synchronously — one at a time.
+        for ((gStart, gEnd) in gaps) {
+            fetchAndPersist(gStart, gEnd)
+            // Continue even on failure — partial fill is better than nothing.
+        }
+    }
 
     /**
      * Merge [newEntities] into the cache, expanding the tracked range.
@@ -264,5 +304,10 @@ class ConsumptionCacheStore @Inject constructor(
         } while (url != null)
 
         return allItems
+    }
+
+    companion object {
+        /** 30 minutes in milliseconds — the half-hour slot interval. */
+        private const val HALF_HOUR_MILLIS = 1_800_000L
     }
 }
