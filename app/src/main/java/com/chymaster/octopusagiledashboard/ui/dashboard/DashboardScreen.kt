@@ -245,8 +245,6 @@ fun DashboardScreen(
                                 }
                             }
 
-                            Spacer(modifier = Modifier.height(8.dp))
-
                             // Chart — always render with displayChartPoints so
                             // the selected time range is visible even before
                             // the Octopus usage API returns data.
@@ -264,6 +262,13 @@ fun DashboardScreen(
                                             chartMode = ChartMode.COST,
                                             onPointTapped = viewModel::onPointTapped,
                                             modifier = Modifier.padding(horizontal = 8.dp)
+                                        )
+                                    }
+                                    if (uiState.isChartLoading) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier
+                                                .align(Alignment.Center)
+                                                .size(48.dp)
                                         )
                                     }
                                 }

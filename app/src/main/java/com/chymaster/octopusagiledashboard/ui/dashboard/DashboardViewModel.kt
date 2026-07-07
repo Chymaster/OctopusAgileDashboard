@@ -46,7 +46,7 @@ data class DashboardUiState(
      * usage API returns data.
      */
     val displayChartPoints: List<HalfHourPoint> = emptyList(),
-    val selectedRange: DateRangeSelection = DateRangeSelection.Preset(TimeRangePreset.TWENTY_FOUR_HOURS),
+    val selectedRange: DateRangeSelection = DateRangeSelection.Preset(TimeRangePreset.SEVEN_DAYS),
     val error: String? = null,
     val selectedBinnedPoint: BinnedPoint? = null,
     val hasCredentials: Boolean = false,
@@ -88,7 +88,7 @@ class DashboardViewModel @Inject constructor(
     val uiState: StateFlow<DashboardUiState> = _uiState.asStateFlow()
 
     private val _selectedRange = MutableStateFlow<DateRangeSelection>(
-        DateRangeSelection.Preset(TimeRangePreset.TWENTY_FOUR_HOURS)
+        DateRangeSelection.Preset(TimeRangePreset.SEVEN_DAYS)
     )
 
     init {
@@ -118,11 +118,8 @@ class DashboardViewModel @Inject constructor(
             _selectedRange.flatMapLatest { range ->
                 val (start, end) = getDateRange(range)
                 flow {
-                    // Emit loading state immediately so the chart shows a
-                    // spinner while real data is being fetched.
-                    emit(range to null)
-                    // Collect real data from the repository. The inner
-                    // combine of prices + consumption flows drives emissions.
+                    // Loading state is now set in onRangeSelected() — no
+                    // null sentinel needed.  Just collect real data.
                     val channel = Channel<Pair<DateRangeSelection, List<HalfHourPoint>>>(Channel.CONFLATED)
                     coroutineScope {
                         launch {
@@ -145,6 +142,8 @@ class DashboardViewModel @Inject constructor(
                                     it.copy(error = refreshResult.exceptionOrNull()?.message ?: "Failed to refresh")
                                 }
                             }
+                            // Refresh complete — clear chart loading spinner
+                            _uiState.update { it.copy(isChartLoading = false) }
                         }
                         launch {
                             repository.fetchFlexiblePrice().onSuccess { price ->
@@ -160,39 +159,36 @@ class DashboardViewModel @Inject constructor(
                     }
                 }
             }.collectLatest { (range, points) ->
-                if (points == null) {
-                    // Loading placeholder — clear stale summary data and show spinners
-                    val (start, end) = getDateRange(range)
-                    _uiState.update {
-                        it.copy(
-                            isLoading = true,
-                            isChartLoading = true,
-                            error = null,
-                            selectedRange = range,
-                            // Clear stale summary data from previous range
-                            usageCost = null,
-                            totalKwh = null,
-                            avgPrice = null,
-                            minPrice = null,
-                            maxPrice = null,
-                            totalCost = null,
-                            standingChargeCost = null,
-                            greenUsageKwh = 0.0,
-                            amberUsageKwh = 0.0,
-                            redUsageKwh = 0.0,
-                            displayChartPoints = it.chartPoints.ifEmpty {
-                                generatePlaceholderPoints(start, end)
-                            }
-                        )
-                    }
-                } else {
-                    updateDashboardWithPoints(points, range)
-                }
+                updateDashboardWithPoints(points, range)
             }
         }
     }
 
     fun onRangeSelected(range: DateRangeSelection) {
+        // Set loading state immediately so the UI shows spinners and
+        // clears stale data before the reactive pipeline kicks in.
+        val (start, end) = getDateRange(range)
+        _uiState.update {
+            it.copy(
+                isLoading = true,
+                isChartLoading = true,
+                error = null,
+                selectedRange = range,
+                points = emptyList(),
+                chartPoints = emptyList(),
+                usageCost = null,
+                totalKwh = null,
+                avgPrice = null,
+                minPrice = null,
+                maxPrice = null,
+                totalCost = null,
+                standingChargeCost = null,
+                greenUsageKwh = 0.0,
+                amberUsageKwh = 0.0,
+                redUsageKwh = 0.0,
+                displayChartPoints = generatePlaceholderPoints(start, end)
+            )
+        }
         _selectedRange.value = range
     }
 
@@ -274,7 +270,6 @@ class DashboardViewModel @Inject constructor(
         _uiState.update {
             it.copy(
                 isLoading = false,
-                isChartLoading = false,
                 points = points,
                 chartPoints = trimmed,
                 displayChartPoints = displayPoints,
@@ -378,7 +373,7 @@ class DashboardViewModel @Inject constructor(
         return when (selection) {
             is DateRangeSelection.Preset -> {
                 val start = when (selection.preset) {
-                    TimeRangePreset.TWENTY_FOUR_HOURS -> now.minusDays(1)
+                    TimeRangePreset.SEVEN_DAYS -> now.minusDays(7)
                     TimeRangePreset.ONE_MONTH -> now.minusDays(30)
                     TimeRangePreset.SIX_MONTHS -> now.minusDays(182)
                     TimeRangePreset.ONE_YEAR -> now.minusDays(365)
