@@ -26,7 +26,7 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun DrawerContent(
     currentRoute: String?,
-    hasCredentials: Boolean,
+    isDemoMode: Boolean,
     onNavigate: (String) -> Unit,
     onCloseDrawer: () -> Unit,
     modifier: Modifier = Modifier
@@ -36,7 +36,7 @@ fun DrawerContent(
     ) {
         Spacer(modifier = Modifier.height(16.dp))
         Text(
-            text = "Octopus Dashboard",
+            text = "Dashboard for Octopus Agile",
             style = MaterialTheme.typography.titleLarge,
             fontWeight = FontWeight.Bold,
             modifier = Modifier.padding(horizontal = 16.dp)
@@ -60,7 +60,7 @@ fun DrawerContent(
             label = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Dashboard")
-                    if (!hasCredentials) {
+                    if (isDemoMode) {
                         Spacer(modifier = Modifier.width(8.dp))
                         Icon(
                             Icons.Default.Info,

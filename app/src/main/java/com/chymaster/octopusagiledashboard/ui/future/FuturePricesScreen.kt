@@ -3,64 +3,67 @@ package com.chymaster.octopusagiledashboard.ui.future
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.chymaster.octopusagiledashboard.domain.model.AgilePrice
 import com.chymaster.octopusagiledashboard.ui.components.ErrorState
 import com.chymaster.octopusagiledashboard.ui.components.LoadingState
+import com.chymaster.octopusagiledashboard.ui.components.SingleDatePickerDialog
 import com.chymaster.octopusagiledashboard.ui.theme.PriceColors
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import java.util.SortedMap
 
 private val londonZone = ZoneId.of("Europe/London")
 private val timeFormatter = DateTimeFormatter.ofPattern("HH:mm", Locale.UK)
 private val dateFormatter = DateTimeFormatter.ofPattern("dd MMM yyyy", Locale.UK)
-private val dateTimeFormatter = DateTimeFormatter.ofPattern("dd MMM HH:mm", Locale.UK)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -80,33 +83,14 @@ fun FuturePricesScreen(
         }.toSortedMap()
     }
 
-    // Find the index of the current 30-min slot. Falls back to today's
-    // section header if the data doesn't include the current time.
+    // Find the index of the current 30-min slot for auto-scroll-to-now
     val today = LocalDate.now(londonZone)
     val now = Instant.now()
     val currentSlotIndex = remember(groupedPrices) {
-        var index = 0
-        for ((date, prices) in groupedPrices) {
-            index++ // section header
-            for (price in prices) {
-                if (price.validFrom <= now && price.validTo > now) {
-                    return@remember index
-                }
-                index++
-            }
-        }
-        // No current slot in the data — find today's section header instead.
-        var fallbackIndex = 0
-        for ((date, prices) in groupedPrices) {
-            if (date == today) return@remember fallbackIndex
-            fallbackIndex++ // section header
-            fallbackIndex += prices.size
-        }
-        0
+        findCurrentSlotIndex(groupedPrices, today, now)
     }
 
-    // Track whether the initial scroll has happened so refreshes don't
-    // yank the user back to the current slot after they've scrolled away.
+    // Track whether the initial scroll has happened
     var hasScrolledInitially by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(groupedPrices) {
@@ -114,6 +98,69 @@ fun FuturePricesScreen(
             listState.animateScrollToItem(currentSlotIndex)
             hasScrolledInitially = true
         }
+    }
+
+    // Handle scroll-to-target from date picker
+    val scrollTargetDate = uiState.scrollTargetDate
+    LaunchedEffect(scrollTargetDate) {
+        if (scrollTargetDate != null) {
+            val targetIndex = findDateSectionIndex(groupedPrices, scrollTargetDate)
+            if (targetIndex >= 0) {
+                listState.animateScrollToItem(targetIndex)
+            }
+            viewModel.onScrollToTargetConsumed()
+        }
+    }
+
+    // Infinite scroll-up: detect when user scrolls near the top
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.firstVisibleItemIndex }
+            .collect { index ->
+                if (index <= 3 && !uiState.isLoadingOlder) {
+                    viewModel.loadOlderPrices()
+                }
+            }
+    }
+
+    // Maintain scroll position when older items are prepended
+    val previousItemCount = remember { mutableIntStateOf(0) }
+    LaunchedEffect(groupedPrices.size) {
+        val newItems = groupedPrices.values.sumOf { it.size } + groupedPrices.size
+        val addedItems = newItems - previousItemCount.intValue
+        if (addedItems > 0 && previousItemCount.intValue > 0) {
+            listState.scrollToItem(addedItems + listState.firstVisibleItemIndex)
+        }
+        previousItemCount.intValue = newItems
+    }
+
+    // "Jump to now" FAB visibility
+    val isNearNow by remember {
+        derivedStateOf {
+            val firstVisible = listState.firstVisibleItemIndex
+            // Show FAB if we're more than 20 items away from the current slot
+            kotlin.math.abs(firstVisible - currentSlotIndex) > 20
+        }
+    }
+
+    // Trigger for "jump to now" FAB
+    var scrollToNowTrigger by remember { mutableIntStateOf(0) }
+    LaunchedEffect(scrollToNowTrigger) {
+        if (scrollToNowTrigger > 0 && currentSlotIndex > 0) {
+            listState.animateScrollToItem(currentSlotIndex)
+        }
+    }
+
+    // Date picker state
+    var showDatePicker by remember { mutableStateOf(false) }
+
+    if (showDatePicker) {
+        SingleDatePickerDialog(
+            onDateSelected = { date ->
+                viewModel.jumpToDate(date)
+                showDatePicker = false
+            },
+            onDismiss = { showDatePicker = false }
+        )
     }
 
     Scaffold(
@@ -126,14 +173,32 @@ fun FuturePricesScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    IconButton(onClick = { showDatePicker = true }) {
+                        Icon(Icons.Default.DateRange, contentDescription = "Go to date")
                     }
                     IconButton(onClick = { viewModel.onRefresh() }) {
                         Icon(Icons.Default.Refresh, contentDescription = "Refresh")
                     }
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
                 }
             )
+        },
+        floatingActionButton = {
+            if (isNearNow && groupedPrices.isNotEmpty()) {
+                FloatingActionButton(
+                    onClick = { scrollToNowTrigger++ },
+                    containerColor = MaterialTheme.colorScheme.primaryContainer
+                ) {
+                    Text(
+                        text = "Now",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
+            }
         }
     ) { paddingValues ->
         when {
@@ -147,9 +212,7 @@ fun FuturePricesScreen(
                 )
             }
             else -> {
-                PullToRefreshBox(
-                    isRefreshing = uiState.isRefreshing,
-                    onRefresh = { viewModel.onRefresh() },
+                Box(
                     modifier = modifier
                         .fillMaxSize()
                         .padding(paddingValues)
@@ -159,6 +222,20 @@ fun FuturePricesScreen(
                         modifier = Modifier.fillMaxSize(),
                         verticalArrangement = Arrangement.spacedBy(2.dp)
                     ) {
+                        // Loading indicator at top for infinite scroll
+                        if (uiState.isLoadingOlder) {
+                            item(key = "loading_older") {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(16.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                                }
+                            }
+                        }
+
                         for ((date, prices) in groupedPrices) {
                             // Date section header
                             item(key = "header_$date") {
@@ -196,6 +273,50 @@ fun FuturePricesScreen(
             }
         }
     }
+}
+
+/**
+ * Find the flat list index of the current half-hour slot for auto-scroll.
+ */
+private fun findCurrentSlotIndex(
+    groupedPrices: SortedMap<LocalDate, List<AgilePrice>>,
+    today: LocalDate,
+    now: Instant
+): Int {
+    var index = 0
+    for ((date, prices) in groupedPrices) {
+        index++ // section header
+        for (price in prices) {
+            if (price.validFrom <= now && price.validTo > now) {
+                return index
+            }
+            index++
+        }
+    }
+    // Fallback: find today's section header
+    var fallbackIndex = 0
+    for ((date, prices) in groupedPrices) {
+        if (date == today) return fallbackIndex
+        fallbackIndex++ // section header
+        fallbackIndex += prices.size
+    }
+    return 0
+}
+
+/**
+ * Find the flat list index of a date's section header.
+ */
+private fun findDateSectionIndex(
+    groupedPrices: SortedMap<LocalDate, List<AgilePrice>>,
+    targetDate: LocalDate
+): Int {
+    var index = 0
+    for ((date, prices) in groupedPrices) {
+        if (date == targetDate) return index
+        index++ // section header
+        index += prices.size
+    }
+    return -1
 }
 
 @Composable

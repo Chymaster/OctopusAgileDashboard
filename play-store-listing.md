@@ -1,8 +1,8 @@
-# Octopus Dashboard — Google Play Store Listing
+# Dashboard for Octopus Agile — Google Play Store Listing
 
 ## App name
 
-Octopus Dashboard
+Dashboard for Octopus Agile
 
 ## Short description (max 80 characters)
 
@@ -12,7 +12,7 @@ Open-source Octopus Agile tracker. Your data never leave your device.
 
 🔋 **The privacy-first way to track Octopus Energy Agile prices**
 
-Octopus Dashboard is a beautiful, open-source companion for Octopus Energy Agile customers. See half-hourly electricity prices, analyse your usage, and find the cheapest slots — all without giving up your privacy.
+Dashboard for Octopus Agile is a beautiful, open-source companion for Octopus Energy Agile customers. See half-hourly electricity prices, analyse your usage, and find the cheapest slots — all without giving up your privacy.
 
 **🔒 Your Data Never Leave Your Device**
 No accounts. No sign-ups. No data collection. Everything — your API key, meter details, usage history, and preferences — is stored locally on your phone and never sent anywhere except directly to Octopus Energy's own API to fetch your tariff data. There are no remote servers, no cloud sync, and no third-party services. Your data never leave your device.

@@ -13,6 +13,10 @@ interface ConsumptionDao {
     @Query("SELECT * FROM consumption WHERE mpan = :mpan AND intervalStart >= :startMillis AND intervalStart < :endMillis ORDER BY intervalStart ASC")
     fun observeRange(mpan: String, startMillis: Long, endMillis: Long): Flow<List<ConsumptionEntity>>
 
+    /** One-shot query for loading data into the in-memory cache. */
+    @Query("SELECT * FROM consumption WHERE mpan = :mpan AND intervalStart >= :startMillis AND intervalStart < :endMillis ORDER BY intervalStart ASC")
+    suspend fun queryRange(mpan: String, startMillis: Long, endMillis: Long): List<ConsumptionEntity>
+
     @Query("DELETE FROM consumption WHERE mpan = :mpan AND intervalStart >= :startMillis AND intervalStart < :endMillis")
     suspend fun deleteRange(mpan: String, startMillis: Long, endMillis: Long)
 

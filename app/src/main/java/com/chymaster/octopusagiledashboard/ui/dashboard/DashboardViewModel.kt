@@ -2,7 +2,6 @@ package com.chymaster.octopusagiledashboard.ui.dashboard
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.chymaster.octopusagiledashboard.data.local.DemoCacheStore
 import com.chymaster.octopusagiledashboard.data.prefs.UserPreferencesRepository
 import com.chymaster.octopusagiledashboard.data.repository.OctopusRepository
 import com.chymaster.octopusagiledashboard.domain.model.DateRangeSelection
@@ -24,7 +23,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.drop
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.time.Instant
@@ -45,7 +43,7 @@ data class DashboardUiState(
      * usage API returns data.
      */
     val displayChartPoints: List<HalfHourPoint> = emptyList(),
-    val selectedRange: DateRangeSelection = DateRangeSelection.Preset(TimeRangePreset.SEVEN_DAYS),
+    val selectedRange: DateRangeSelection = DateRangeSelection.Preset(TimeRangePreset.TWENTY_FOUR_HOURS),
     val error: String? = null,
     val selectedBinnedPoint: BinnedPoint? = null,
     val hasCredentials: Boolean = false,
@@ -74,8 +72,7 @@ class DashboardViewModel @Inject constructor(
     private val getDashboardDataUseCase: GetDashboardDataUseCase,
     private val refreshDashboardDataUseCase: RefreshDashboardDataUseCase,
     private val repository: OctopusRepository,
-    private val preferencesRepository: UserPreferencesRepository,
-    private val demoCacheStore: DemoCacheStore
+    private val preferencesRepository: UserPreferencesRepository
 ) : ViewModel() {
 
     private val londonZone = ZoneId.of("Europe/London")
@@ -84,36 +81,18 @@ class DashboardViewModel @Inject constructor(
     val uiState: StateFlow<DashboardUiState> = _uiState.asStateFlow()
 
     private val _selectedRange = MutableStateFlow<DateRangeSelection>(
-        DateRangeSelection.Preset(TimeRangePreset.SEVEN_DAYS)
+        DateRangeSelection.Preset(TimeRangePreset.TWENTY_FOUR_HOURS)
     )
 
     private var dataJob: Job? = null
 
     init {
         viewModelScope.launch {
-            // Track credential state. On every change (including the first
-            // emission when the ViewModel starts), update the UI flag. On a
-            // flip (demo↔real) wipe BOTH caches so the chart switches
-            // sources without a flash of stale data, then reload.
-            var prev: Boolean? = null
-            preferencesRepository.hasCredentials.collect { hasCreds ->
-                val flipped = prev != null && prev != hasCreds
-                if (flipped) {
-                    // Purge both caches on a mode switch:
-                    //  - demo → real: rows tagged with the demo tariff code
-                    //    linger in Room from the public-API refresh; without a
-                    //    wipe they briefly appear on the real Dashboard.
-                    //  - real → demo: the previous user's prices and
-                    //    consumption would flash on the demo chart.
-                    demoCacheStore.clearAll()
-                    repository.purgeAllUserData()
-                }
-                prev = hasCreds
-                _uiState.update { it.copy(hasCredentials = hasCreds) }
-                // Always reload: handles both the initial load (first
-                // emission) and mode switches (flipped). The cancelled job
-                // is fine — loadData reads hasCredentials from _uiState
-                // which is already updated above.
+            preferencesRepository.isDemoMode.collect { isDemo ->
+                _uiState.update { it.copy(hasCredentials = !isDemo, isDemoMode = isDemo) }
+                // Cache wipe is handled by the repository (via
+                // UserPreferencesRepository.saveCredentials) and the
+                // observe* methods react to credential changes automatically.
                 dataJob?.cancel()
                 dataJob = loadData(_selectedRange.value)
             }
@@ -127,15 +106,6 @@ class DashboardViewModel @Inject constructor(
         viewModelScope.launch {
             preferencesRepository.moderateThresholdPercentFlow.collect { pct ->
                 _uiState.update { it.copy(moderateThresholdPercent = pct) }
-                recomputeZoneBreakdown()
-            }
-        }
-        // Immediately show cached flexible price if available (and within TTL)
-        viewModelScope.launch {
-            val cachedPrice = preferencesRepository.cachedFlexiblePriceFlow.first()
-            val cachedTimestamp = preferencesRepository.cachedFlexiblePriceTimestampFlow.first()
-            if (cachedPrice != null && System.currentTimeMillis() - cachedTimestamp < FLEXIBLE_CACHE_TTL_MS) {
-                _uiState.update { it.copy(flexiblePrice = cachedPrice) }
                 recomputeZoneBreakdown()
             }
         }
@@ -204,43 +174,25 @@ class DashboardViewModel @Inject constructor(
         _uiState.update { it.copy(error = null) }
     }
 
-    companion object {
-        /** 30 days in milliseconds — cache TTL for the flexible price. */
-        private const val FLEXIBLE_CACHE_TTL_MS = 30L * 24 * 60 * 60 * 1000
-    }
-
     /**
-     * Single, source-agnostic load path. The repository branches on
-     * `hasCredentials` internally, so this function:
+     * Single, source-agnostic load path. The unified cache stores handle
+     * demo/real branching internally, so this function:
      *
-     *  1. Seeds the in-memory [DemoCacheStore] when no credentials are
-     *     configured, so the first observation emission is a fully populated
-     *     list (this is what eliminates the flicker).
-     *  2. Starts the dashboard flow (which reads from the demo store or Room
-     *     depending on credential state) and the standing-charge flow.
-     *  3. Triggers a refresh in the background — the public Agile API in
-     *     demo mode, the authenticated API in real mode.
+     *  1. Starts the dashboard flow (which reads from the unified cache
+     *     stores) and the standing-charge flow.
+     *  2. Triggers a refresh in the background — the cache stores route
+     *     to the correct data source based on [UserPreferencesRepository.isDemoMode].
      */
     private fun loadData(range: DateRangeSelection): Job {
         return viewModelScope.launch {
             val (start, end) = getDateRange(range)
-            val hasCreds = _uiState.value.hasCredentials
-
-            // Seed the demo store BEFORE observing so the first emission
-            // is non-empty. In real mode this branch is skipped — the
-            // repository reads from Room, which is the source of truth.
-            if (!hasCreds) {
-                demoCacheStore.seedConsumption(start, end)
-                demoCacheStore.seedPrices(start, end)
-                demoCacheStore.seedStandingCharge()
-            }
 
             _uiState.update {
                 it.copy(
                     isLoading = it.points.isEmpty(),
                     error = null,
                     selectedRange = range,
-                    isDemoMode = !hasCreds,
+                    // isDemoMode is set by the hasCredentials collector
                     // Show placeholder points immediately so the chart renders
                     // the time range even before data arrives.
                     displayChartPoints = it.chartPoints.ifEmpty {
@@ -250,8 +202,8 @@ class DashboardViewModel @Inject constructor(
             }
 
             coroutineScope {
-                // Observe the dashboard flow. The repository branches
-                // internally on hasCredentials: demo → DemoCacheStore, real → Room.
+                // Observe the dashboard flow. The unified cache stores
+                // handle demo/real branching internally.
                 launch {
                     getDashboardDataUseCase(start, end).collectLatest { points ->
                         updateDashboardWithPoints(points, start, end)
@@ -408,7 +360,7 @@ class DashboardViewModel @Inject constructor(
         return when (selection) {
             is DateRangeSelection.Preset -> {
                 val start = when (selection.preset) {
-                    TimeRangePreset.SEVEN_DAYS -> now.minusDays(7)
+                    TimeRangePreset.TWENTY_FOUR_HOURS -> now.minusDays(1)
                     TimeRangePreset.ONE_MONTH -> now.minusDays(30)
                     TimeRangePreset.SIX_MONTHS -> now.minusDays(182)
                     TimeRangePreset.ONE_YEAR -> now.minusDays(365)

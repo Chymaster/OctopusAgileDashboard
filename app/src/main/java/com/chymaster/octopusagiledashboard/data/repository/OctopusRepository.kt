@@ -1,5 +1,6 @@
 package com.chymaster.octopusagiledashboard.data.repository
 
+import com.chymaster.octopusagiledashboard.data.local.entity.AgilePriceEntity
 import com.chymaster.octopusagiledashboard.domain.model.AgilePrice
 import com.chymaster.octopusagiledashboard.domain.model.ConsumptionRecord
 import com.chymaster.octopusagiledashboard.domain.model.HalfHourPoint
@@ -11,24 +12,37 @@ interface OctopusRepository {
 
     fun observeAgilePrices(start: Instant, end: Instant): Flow<List<AgilePrice>>
 
+    /**
+     * Observe raw [AgilePriceEntity] objects for [start]..[end].
+     * Used internally for [observeDashboardData] which needs entity-level access
+     * to build [HalfHourPoint]s.
+     */
+    fun observeAgilePriceEntities(start: Instant, end: Instant): Flow<List<AgilePriceEntity>>
+
     fun observeConsumption(start: Instant, end: Instant): Flow<List<ConsumptionRecord>>
 
     fun observeDashboardData(start: Instant, end: Instant): Flow<List<HalfHourPoint>>
 
     fun observeStandingCharges(start: Instant, end: Instant): Flow<List<StandingCharge>>
 
-    suspend fun refreshAgilePrices(start: Instant, end: Instant): Result<Unit>
+    /**
+     * Get agile prices for [start]..[end].
+     * Checks in-memory cache first, then Room, then fetches from the API only
+     * if Room has no data for the requested range.
+     * Returns the list of prices (empty on failure).
+     */
+    suspend fun getAgilePrices(start: Instant, end: Instant): List<AgilePrice>
 
     suspend fun refreshConsumption(start: Instant, end: Instant): Result<Unit>
 
     suspend fun refreshStandingCharges(start: Instant, end: Instant): Result<Unit>
 
     /**
-     * Wipe every cached entity from the local Room database. Called on every
-     * credential flip (demo ↔ real) so stale data from the previous state
-     * does not flash on the chart after the switch.
+     * Wipe both the in-memory demo cache and the persistent Room cache.
+     * Called on every credential save so no stale data from the previous
+     * mode (demo or real) flashes on the next observation.
      */
-    suspend fun purgeAllUserData()
+    suspend fun wipeAllCaches()
 
     suspend fun fetchMeterGsp(mpan: String): Result<String>
 
