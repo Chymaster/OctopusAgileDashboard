@@ -1,6 +1,7 @@
 package com.chymaster.octopusagiledashboard.ui.chart
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -21,7 +22,6 @@ import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -33,33 +33,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.chymaster.octopusagiledashboard.domain.model.HalfHourPoint
 import com.chymaster.octopusagiledashboard.ui.theme.PriceColors
-import com.patrykandpatrick.vico.compose.cartesian.CartesianChartHost
-import com.patrykandpatrick.vico.compose.cartesian.Zoom
-import com.patrykandpatrick.vico.compose.cartesian.axis.Axis
-import com.patrykandpatrick.vico.compose.cartesian.axis.HorizontalAxis
-import com.patrykandpatrick.vico.compose.cartesian.axis.VerticalAxis
-import com.patrykandpatrick.vico.compose.cartesian.data.CartesianChartModelProducer
-import com.patrykandpatrick.vico.compose.cartesian.data.CartesianLayerRangeProvider
-import com.patrykandpatrick.vico.compose.cartesian.data.ColumnCartesianLayerModel
-import com.patrykandpatrick.vico.compose.cartesian.data.columnModel
-import com.patrykandpatrick.vico.compose.cartesian.data.lineModel
-import com.patrykandpatrick.vico.compose.cartesian.layer.ColumnCartesianLayer
-import com.patrykandpatrick.vico.compose.cartesian.layer.LineCartesianLayer
-import com.patrykandpatrick.vico.compose.cartesian.layer.rememberColumnCartesianLayer
-import com.patrykandpatrick.vico.compose.cartesian.layer.rememberLineCartesianLayer
-import com.patrykandpatrick.vico.compose.cartesian.marker.CartesianMarker
-import com.patrykandpatrick.vico.compose.cartesian.marker.CartesianMarkerVisibilityListener
-import com.patrykandpatrick.vico.compose.cartesian.marker.DefaultCartesianMarker
-import com.patrykandpatrick.vico.compose.cartesian.rememberCartesianChart
-import com.patrykandpatrick.vico.compose.cartesian.rememberVicoScrollState
-import com.patrykandpatrick.vico.compose.cartesian.rememberVicoZoomState
-import com.patrykandpatrick.vico.compose.common.Fill
-import com.patrykandpatrick.vico.compose.common.component.LineComponent
-import com.patrykandpatrick.vico.compose.common.component.ShapeComponent
-import com.patrykandpatrick.vico.compose.common.data.ExtraStore
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 /**
- * Dual-axis Vico chart that overlays price (bars, LEFT Y axis in pence/kWh)
+ * Dual-axis chart that overlays price (bars, LEFT Y axis in pence/kWh)
  * and usage (line, RIGHT Y axis in kWh) on a shared time axis.
  *
  * Price bars are ratio-coloured against [referencePrice] (the Flexible Octopus
@@ -75,116 +54,67 @@ fun PriceUsageChart(
 ) {
     if (points.isEmpty()) return
 
-    // Trim edge intervals that have no consumption data (API lag / stale 0s).
+    // Trim edge intervals that have no consumption data.
     val trimmedPoints = remember(points) { points.trimMissingConsumption() }
     if (trimmedPoints.isEmpty()) return
 
-    val modelProducer = remember { CartesianChartModelProducer() }
     var isZoomed by remember { mutableStateOf(false) }
 
+    // Auto-bin to keep bar count ≤ 20
     val binnedPoints = remember(trimmedPoints) { binPoints(trimmedPoints) }
     val useBinned = !isZoomed && binnedPoints.size < trimmedPoints.size
-    val displayPoints = if (useBinned) binnedPoints else null
+    val displayData = if (useBinned) binnedPoints else null
 
-    val xIndices = if (useBinned) {
-        binnedPoints.indices.map { it.toDouble() }
-    } else {
-        trimmedPoints.indices.map { it.toDouble() }
-    }
+    val londonZone = ZoneId.of("Europe/London")
+    val timeFormatter = DateTimeFormatter.ofPattern("HH:mm", Locale.UK)
 
-    // Per-bar y-values. Vico's line series requires non-null numbers, so we
-    // substitute 0.0 for missing consumption. The line dips to the right-axis
-    // baseline where there is no usage, which is honest ("no usage in this
-    // slot") rather than misleading.
-    val priceYs: List<Double> = remember(useBinned, displayPoints, trimmedPoints) {
-        if (useBinned && displayPoints != null) {
-            displayPoints.map { it.avgPrice ?: 0.0 }
+    // Build ChartBar list (price values for bars)
+    val bars = remember(displayData, trimmedPoints, useBinned) {
+        if (useBinned && displayData != null) {
+            displayData.map { bin ->
+                ChartBar(
+                    label = bin.intervalStart.atZone(londonZone).format(timeFormatter),
+                    value = bin.avgPrice ?: 0.0,
+                    intervalStart = bin.intervalStart,
+                    intervalEnd = bin.intervalEnd
+                )
+            }
         } else {
-            trimmedPoints.map { it.priceIncVat ?: 0.0 }
+            trimmedPoints.map { p ->
+                ChartBar(
+                    label = p.intervalStart.atZone(londonZone).format(timeFormatter),
+                    value = p.priceIncVat ?: 0.0,
+                    intervalStart = p.intervalStart,
+                    intervalEnd = p.intervalEnd
+                )
+            }
         }
     }
-    val usageYs: List<Double> = remember(useBinned, displayPoints, trimmedPoints) {
-        if (useBinned && displayPoints != null) {
-            displayPoints.map { it.totalConsumption ?: 0.0 }
+
+    // Per-bar colors based on price ratio
+    val barColors = remember(bars, referencePrice) {
+        bars.map { bar ->
+            PriceColors.priceColor(bar.value, referencePrice)
+        }
+    }
+
+    // Usage line values
+    val usageValues = remember(displayData, trimmedPoints, useBinned) {
+        if (useBinned && displayData != null) {
+            displayData.map { it.totalConsumption ?: 0.0 }
         } else {
             trimmedPoints.map { it.consumptionKwh ?: 0.0 }
         }
     }
 
-    // Align zero points on both Y axes so that 0 p/kWh and 0 kWh sit at the
-    // same vertical position.  Without this, negative prices push the price
-    // axis zero upward while usage zero stays at the bottom — making usage
-    // *look* negative when it isn't.
-    val (priceRangeProvider, usageRangeProvider) = remember(priceYs, usageYs) {
-        computeAlignedRangeProviders(priceYs, usageYs)
+    // Compute aligned Y ranges so zero sits at the same position on both axes
+    val priceYs = bars.map { it.value }
+    val (priceMin, priceMax, usageMin, usageMax) = remember(priceYs, usageValues) {
+        computeAlignedRanges(priceYs, usageValues)
     }
 
-    LaunchedEffect(trimmedPoints, isZoomed) {
-        modelProducer.runTransaction {
-            columnModel { series(x = xIndices, y = priceYs) }
-            lineModel { series(x = xIndices, y = usageYs) }
-        }
-    }
-
-    // One LineComponent per bar, colored by the bar's price ratio. The
-    // custom PerBarColumnProvider below maps entry.x.toInt() → component,
-    // because Vico's built-in ColumnProvider.series only varies by series
-    // index, not by individual entry.
-    val perBarColumnProvider = remember(binnedPoints, referencePrice, useBinned) {
-        val components: List<LineComponent> = if (useBinned && displayPoints != null) {
-            displayPoints.map { bin ->
-                LineComponent(
-                    fill = Fill(PriceColors.priceColor(bin.avgPrice ?: 0.0, referencePrice)),
-                    thickness = 8.dp,
-                )
-            }
-        } else {
-            trimmedPoints.map { p ->
-                LineComponent(
-                    fill = Fill(PriceColors.priceColor(p.priceIncVat ?: 0.0, referencePrice)),
-                    thickness = 8.dp,
-                )
-            }
-        }
-        PerBarColumnProvider(components)
-    }
-
+    val isScrollable = isZoomed
     val usageLineColor = ChartColors.ConsumptionLine
-    val usagePointShape = ShapeComponent(fill = Fill(usageLineColor), shape = CircleShape)
-    val usagePoint = LineCartesianLayer.Point(
-        component = usagePointShape,
-        size = 4.dp,
-    )
-    val usageLine = remember(usageLineColor, usagePoint) {
-        LineCartesianLayer.Line(
-            fill = LineCartesianLayer.LineFill.single(Fill(usageLineColor)),
-            stroke = LineCartesianLayer.LineStroke.Continuous(thickness = 2.5.dp),
-            pointProvider = LineCartesianLayer.PointProvider.single(usagePoint),
-        )
-    }
-    val usageLineProvider = LineCartesianLayer.LineProvider.series(usageLine)
-
-    // No suffix — the dual-axis chart legend already indicates units, and a
-    // single suffix would incorrectly label both the price and usage series.
-    val marker = rememberPriceMarker(DefaultCartesianMarker.ValueFormatter.default())
-    val markerListener = remember(trimmedPoints, useBinned, displayPoints, onPointTapped) {
-        object : CartesianMarkerVisibilityListener {
-            override fun onShown(marker: CartesianMarker, targets: List<CartesianMarker.Target>) {
-                emitTappedTarget(targets, useBinned, displayPoints, trimmedPoints, onPointTapped)
-            }
-            override fun onUpdated(marker: CartesianMarker, targets: List<CartesianMarker.Target>) {
-                emitTappedTarget(targets, useBinned, displayPoints, trimmedPoints, onPointTapped)
-            }
-            override fun onHidden(marker: CartesianMarker) {}
-        }
-    }
-    val timeFormatter = remember(trimmedPoints, useBinned, displayPoints) {
-        if (useBinned && displayPoints != null) {
-            ChartFormatters.binnedTimeAxisFormatter(displayPoints)
-        } else {
-            ChartFormatters.timeAxisFormatter(trimmedPoints)
-        }
-    }
 
     Column(modifier = modifier) {
         // Legend + zoom toggle row
@@ -222,84 +152,80 @@ fun PriceUsageChart(
             }
         }
 
-        CartesianChartHost(
-            chart = rememberCartesianChart(
-                rememberColumnCartesianLayer(
-                    columnProvider = perBarColumnProvider,
-                    rangeProvider = priceRangeProvider,
-                    verticalAxisPosition = Axis.Position.Vertical.Start,
-                ),
-                rememberLineCartesianLayer(
-                    lineProvider = usageLineProvider,
-                    rangeProvider = usageRangeProvider,
-                    verticalAxisPosition = Axis.Position.Vertical.End,
-                ),
-                startAxis = VerticalAxis.rememberStart(
-                    valueFormatter = ChartFormatters.priceAxisFormatter,
-                ),
-                endAxis = VerticalAxis.rememberEnd(
-                    valueFormatter = ChartFormatters.consumptionAxisFormatter,
-                ),
-                bottomAxis = HorizontalAxis.rememberBottom(
-                    valueFormatter = timeFormatter,
-                ),
-                marker = marker,
-                markerVisibilityListener = markerListener,
-            ),
-            modelProducer = modelProducer,
-            scrollState = rememberVicoScrollState(scrollEnabled = isZoomed),
-            zoomState = rememberVicoZoomState(
-                zoomEnabled = isZoomed,
-                initialZoom = if (isZoomed) Zoom.fixed() else Zoom.Content,
-                minZoom = Zoom.Content,
-                maxZoom = if (isZoomed) Zoom.max(Zoom.fixed(3f), Zoom.Content) else Zoom.Content,
-            ),
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(260.dp),
+        CanvasBarChart(
+            bars = bars,
+            barColors = barColors,
+            yMin = priceMin,
+            yMax = priceMax,
+            isScrollable = isScrollable,
+            onBarTapped = { idx ->
+                if (useBinned && displayData != null) {
+                    onPointTapped(displayData.getOrNull(idx))
+                } else {
+                    val p = trimmedPoints.getOrNull(idx)
+                    onPointTapped(p?.let {
+                        BinnedPoint(it.intervalStart, it.intervalEnd, it.priceIncVat, it.consumptionKwh, it.costIncVat, 1)
+                    })
+                }
+            },
+            usageValues = usageValues,
+            usageYMin = usageMin,
+            usageYMax = usageMax,
+            usageLineColor = usageLineColor,
         )
     }
 }
 
-private fun emitTappedTarget(
-    targets: List<CartesianMarker.Target>,
-    useBinned: Boolean,
-    displayPoints: List<BinnedPoint>?,
-    rawPoints: List<HalfHourPoint>,
-    onPointTapped: (BinnedPoint?) -> Unit,
-) {
-    val index = targets.firstOrNull()?.x?.toInt() ?: return
-    if (useBinned && displayPoints != null) {
-        onPointTapped(displayPoints.getOrNull(index))
-    } else {
-        val p = rawPoints.getOrNull(index)
-        onPointTapped(p?.let {
-            BinnedPoint(it.intervalStart, it.intervalEnd, it.priceIncVat, it.consumptionKwh, it.costIncVat, 1)
-        })
-    }
-}
-
 /**
- * Per-bar [ColumnCartesianLayer.ColumnProvider] that returns a distinct
- * [LineComponent] for each entry, looked up by the entry's x index. Vico's
- * built-in [ColumnCartesianLayer.ColumnProvider.series] only varies components
- * by series index, not by entry, so this custom provider is the simplest way
- * to colour each price bar by its individual value.
+ * Computes four aligned Y-axis values: (priceMin, priceMax, usageMin, usageMax)
+ * such that zero sits at the same vertical fraction on both the price and usage
+ * axes. This prevents non-negative usage from *looking* negative when prices
+ * dip below zero.
  */
-private class PerBarColumnProvider(
-    private val components: List<LineComponent>,
-) : ColumnCartesianLayer.ColumnProvider {
-    override fun getColumn(
-        entry: ColumnCartesianLayerModel.Entry,
-        extraStore: ExtraStore,
-    ): LineComponent = components.getOrElse(entry.x.toInt()) { components.last() }
+private fun computeAlignedRanges(
+    priceYs: List<Double>,
+    usageYs: List<Double>,
+): AlignedRanges {
+    if (priceYs.isEmpty() || usageYs.isEmpty()) {
+        return AlignedRanges(0.0, 1.0, 0.0, 1.0)
+    }
 
-    override fun getWidestSeriesColumn(
-        seriesKey: Any,
-        seriesIndex: Int,
-        extraStore: ExtraStore,
-    ): LineComponent = components.first()
+    val rawPriceMin = priceYs.min()
+    val rawPriceMax = priceYs.max()
+    val rawUsageMax = usageYs.max()
+
+    // Price axis: ensure zero is always included with a small buffer.
+    val priceRange = (rawPriceMax - rawPriceMin).coerceAtLeast(0.1)
+    val pricePad = priceRange * 0.1
+    val pMin = (rawPriceMin - pricePad).coerceAtMost(0.0)
+    val pMax = (rawPriceMax + pricePad).coerceAtLeast(0.0)
+
+    // Where does zero sit on the price axis? 0 = bottom, 1 = top.
+    val priceZeroFraction = if (pMin < 0 && pMax > 0) {
+        -pMin / (pMax - pMin)
+    } else {
+        // Price is entirely >= 0 — axes already align at the bottom edge.
+        return AlignedRanges(pMin, pMax, 0.0, rawUsageMax * 1.1)
+    }
+
+    // Usage axis: extend below zero so its zero fraction matches the price axis.
+    val usagePad = (rawUsageMax * 0.1).coerceAtLeast(0.05)
+    val uMax = rawUsageMax + usagePad
+    val uMin = if (uMax > 0) {
+        -uMax * priceZeroFraction / (1.0 - priceZeroFraction)
+    } else {
+        0.0
+    }
+
+    return AlignedRanges(pMin, pMax, uMin, uMax)
 }
+
+private data class AlignedRanges(
+    val priceMin: Double,
+    val priceMax: Double,
+    val usageMin: Double,
+    val usageMax: Double,
+)
 
 private enum class LegendShape { Square, Circle }
 
@@ -331,58 +257,4 @@ private fun LegendSwatch(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
-}
-
-/**
- * Computes two [CartesianLayerRangeProvider]s — one for the price bars (left
- * axis) and one for the usage line (right axis) — whose Y ranges place zero
- * at the same vertical position on both axes.
- *
- * When energy prices go negative the default auto-scaling pushes the price
- * axis zero upward while the usage axis zero stays at the bottom — making
- * non-negative usage *look* negative.  This function fixes that by computing
- * a shared "zero fraction" and deriving both axis ranges from it.
- *
- * If the price data is entirely non-negative the axes already align naturally,
- * so we fall back to [CartesianLayerRangeProvider.auto] for both.
- */
-private fun computeAlignedRangeProviders(
-    priceYs: List<Double>,
-    usageYs: List<Double>,
-): Pair<CartesianLayerRangeProvider, CartesianLayerRangeProvider> {
-    if (priceYs.isEmpty() || usageYs.isEmpty()) {
-        val auto = CartesianLayerRangeProvider.auto()
-        return auto to auto
-    }
-
-    val rawPriceMin = priceYs.min()
-    val rawPriceMax = priceYs.max()
-    val rawUsageMax = usageYs.max()
-
-    // Price axis: ensure zero is always included with a small buffer.
-    val priceRange = (rawPriceMax - rawPriceMin).coerceAtLeast(0.1)
-    val pricePad = priceRange * 0.1
-    val priceMin = (rawPriceMin - pricePad).coerceAtMost(0.0)
-    val priceMax = (rawPriceMax + pricePad).coerceAtLeast(0.0)
-
-    // Where does zero sit on the price axis?  0 = bottom, 1 = top.
-    val priceZeroFraction = if (priceMin < 0 && priceMax > 0) {
-        -priceMin / (priceMax - priceMin)
-    } else {
-        // Price is entirely ≥ 0 — axes already align at the bottom edge.
-        val auto = CartesianLayerRangeProvider.auto()
-        return auto to auto
-    }
-
-    // Usage axis: extend below zero so its zero fraction matches the price axis.
-    val usagePad = (rawUsageMax * 0.1).coerceAtLeast(0.05)
-    val usageMax = rawUsageMax + usagePad
-    val usageMin = if (usageMax > 0) {
-        -usageMax * priceZeroFraction / (1.0 - priceZeroFraction)
-    } else {
-        0.0
-    }
-
-    return CartesianLayerRangeProvider.fixed(minY = priceMin, maxY = priceMax) to
-        CartesianLayerRangeProvider.fixed(minY = usageMin, maxY = usageMax)
 }

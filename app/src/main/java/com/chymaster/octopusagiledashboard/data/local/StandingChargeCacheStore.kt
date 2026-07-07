@@ -8,6 +8,7 @@ import com.chymaster.octopusagiledashboard.data.prefs.UserPreferencesRepository
 import com.chymaster.octopusagiledashboard.data.remote.api.OctopusApiService
 import com.chymaster.octopusagiledashboard.data.remote.dto.PaginatedResponse
 import com.chymaster.octopusagiledashboard.data.remote.dto.StandingChargeDto
+import com.chymaster.octopusagiledashboard.domain.model.ApiError
 import com.chymaster.octopusagiledashboard.domain.model.StandingCharge
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -101,6 +102,8 @@ class StandingChargeCacheStore @Inject constructor(
                 val entities = standingChargeDao.queryRange(start.toEpochMilli(), end.toEpochMilli())
                 mergeAndEmit(entities, start, end)
                 Result.success(Unit)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Result.failure(e)
             }
@@ -188,6 +191,12 @@ class StandingChargeCacheStore @Inject constructor(
             val entities = allCharges.map { it.toEntity(tariffCode) }
             standingChargeDao.insertAll(entities)
             Result.success(Unit)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: ApiError) {
+            Result.failure(e)
+        } catch (e: java.io.IOException) {
+            Result.failure(ApiError.NetworkError(cause = e))
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -224,7 +233,7 @@ class StandingChargeCacheStore @Inject constructor(
         do {
             val response = request(url)
             if (!response.isSuccessful) {
-                throw Exception("API error: ${response.code()} ${response.message()}")
+                throw ApiError.fromHttpCode(response.code())
             }
             val body = response.body() ?: break
             allCharges.addAll(body.results)

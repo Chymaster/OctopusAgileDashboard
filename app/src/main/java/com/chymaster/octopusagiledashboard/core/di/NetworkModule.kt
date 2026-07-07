@@ -1,6 +1,7 @@
 package com.chymaster.octopusagiledashboard.core.di
 
 import com.chymaster.octopusagiledashboard.core.network.AuthInterceptor
+import com.chymaster.octopusagiledashboard.core.network.RetryInterceptor
 import com.chymaster.octopusagiledashboard.core.util.Constants
 import com.chymaster.octopusagiledashboard.data.remote.api.CarbonIntensityApiService
 import com.chymaster.octopusagiledashboard.data.remote.api.OctopusApiService
@@ -37,6 +38,7 @@ object NetworkModule {
         }
 
         return OkHttpClient.Builder()
+            .addInterceptor(RetryInterceptor())
             .addInterceptor(authInterceptor)
             .addInterceptor(loggingInterceptor)
             .connectTimeout(30, TimeUnit.SECONDS)
@@ -65,6 +67,7 @@ object NetworkModule {
     @Singleton
     fun provideCarbonIntensityApiService(json: Json): CarbonIntensityApiService {
         val client = OkHttpClient.Builder()
+            .addInterceptor(RetryInterceptor())
             .addInterceptor(HttpLoggingInterceptor().apply {
                 level = HttpLoggingInterceptor.Level.BODY
             })

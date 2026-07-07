@@ -31,4 +31,13 @@ interface AgilePriceDao {
 
     @Query("DELETE FROM agile_prices")
     suspend fun deleteAll()
+
+    @Query("SELECT COUNT(*) FROM agile_prices")
+    suspend fun totalCount(): Int
+
+    @Query("SELECT MIN(validFrom) FROM agile_prices")
+    suspend fun earliestTimestamp(): Long?
+
+    @Query("SELECT MAX(validFrom) FROM agile_prices")
+    suspend fun latestTimestamp(): Long?
 }
