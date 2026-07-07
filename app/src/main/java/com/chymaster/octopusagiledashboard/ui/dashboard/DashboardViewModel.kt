@@ -161,14 +161,25 @@ class DashboardViewModel @Inject constructor(
                 }
             }.collectLatest { (range, points) ->
                 if (points == null) {
-                    // Loading placeholder — show spinner over the chart
+                    // Loading placeholder — clear stale summary data and show spinners
                     val (start, end) = getDateRange(range)
                     _uiState.update {
                         it.copy(
-                            isLoading = it.points.isEmpty(),
+                            isLoading = true,
                             isChartLoading = true,
                             error = null,
                             selectedRange = range,
+                            // Clear stale summary data from previous range
+                            usageCost = null,
+                            totalKwh = null,
+                            avgPrice = null,
+                            minPrice = null,
+                            maxPrice = null,
+                            totalCost = null,
+                            standingChargeCost = null,
+                            greenUsageKwh = 0.0,
+                            amberUsageKwh = 0.0,
+                            redUsageKwh = 0.0,
                             displayChartPoints = it.chartPoints.ifEmpty {
                                 generatePlaceholderPoints(start, end)
                             }

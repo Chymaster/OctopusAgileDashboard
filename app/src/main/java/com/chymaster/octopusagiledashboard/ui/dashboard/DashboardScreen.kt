@@ -181,6 +181,14 @@ fun DashboardScreen(
                                         maxPrice = uiState.maxPrice
                                     )
                                 }
+                                // Overlay loading spinner when transitioning between ranges
+                                if (uiState.isLoading && uiState.totalCost == null) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier
+                                            .align(Alignment.Center)
+                                            .size(32.dp)
+                                    )
+                                }
                                 DataPointDetailSheet(
                                     point = selectedPoint,
                                     onDismiss = { viewModel.onPointTapped(null) }
