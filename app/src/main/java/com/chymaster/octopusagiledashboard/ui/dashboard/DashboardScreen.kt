@@ -46,7 +46,6 @@ import com.chymaster.octopusagiledashboard.ui.chart.PriceUsageChart
 import com.chymaster.octopusagiledashboard.ui.components.CustomDatePickerDialog
 import com.chymaster.octopusagiledashboard.ui.components.DemoModeBanner
 import com.chymaster.octopusagiledashboard.ui.components.ErrorState
-import com.chymaster.octopusagiledashboard.ui.components.LoadingState
 import com.chymaster.octopusagiledashboard.ui.components.PriceRangeCards
 import com.chymaster.octopusagiledashboard.ui.components.RangeSelector
 import com.chymaster.octopusagiledashboard.ui.components.SummaryCards
@@ -127,10 +126,19 @@ fun DashboardScreen(
 
             Spacer(modifier = Modifier.height(8.dp))
 
+            // Top-of-screen loading indicator — visible while any
+            // repository method is still loading or the flow hasn't
+            // returned real data yet.
+            if (uiState.isChartLoading) {
+                CircularProgressIndicator(
+                    modifier = Modifier
+                        .align(Alignment.CenterHorizontally)
+                        .size(32.dp)
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+
             when {
-                uiState.isLoading && uiState.points.isEmpty() -> {
-                    LoadingState()
-                }
                 uiState.error != null && uiState.points.isEmpty() -> {
                     ErrorState(
                         message = uiState.error ?: "Unknown error",
@@ -241,13 +249,6 @@ fun DashboardScreen(
                                             chartMode = ChartMode.COST,
                                             onPointTapped = viewModel::onPointTapped,
                                             modifier = Modifier.padding(horizontal = 8.dp)
-                                        )
-                                    }
-                                    if (uiState.isChartLoading) {
-                                        CircularProgressIndicator(
-                                            modifier = Modifier
-                                                .align(Alignment.Center)
-                                                .size(40.dp)
                                         )
                                     }
                                 }
