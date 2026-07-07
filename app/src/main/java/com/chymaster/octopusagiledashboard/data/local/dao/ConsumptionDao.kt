@@ -31,4 +31,13 @@ interface ConsumptionDao {
 
     @Query("DELETE FROM consumption")
     suspend fun deleteAll()
+
+    @Query("SELECT COUNT(*) FROM consumption")
+    suspend fun totalCount(): Int
+
+    @Query("SELECT MIN(intervalStart) FROM consumption")
+    suspend fun earliestTimestamp(): Long?
+
+    @Query("SELECT MAX(intervalStart) FROM consumption")
+    suspend fun latestTimestamp(): Long?
 }
