@@ -15,15 +15,16 @@ import com.chymaster.octopusagiledashboard.domain.usecase.RefreshDashboardDataUs
 import com.chymaster.octopusagiledashboard.ui.theme.PriceColors
 import java.time.temporal.ChronoUnit
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.isActive
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.time.Instant
@@ -65,9 +66,12 @@ data class DashboardUiState(
     val greenUsageKwh: Double = 0.0,
     val amberUsageKwh: Double = 0.0,
     val redUsageKwh: Double = 0.0,
-    val showUsageBreakdown: Boolean = false
+    val showUsageBreakdown: Boolean = false,
+    /** True while the chart is waiting for real data after a range change or refresh. */
+    val isChartLoading: Boolean = true
 )
 
+@OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class DashboardViewModel @Inject constructor(
     private val getDashboardDataUseCase: GetDashboardDataUseCase,
@@ -85,17 +89,12 @@ class DashboardViewModel @Inject constructor(
         DateRangeSelection.Preset(TimeRangePreset.TWENTY_FOUR_HOURS)
     )
 
-    private var dataJob: Job? = null
-
     init {
+        // React to demo mode flag for UI state only. The data flow below
+        // reacts to repository cache wipes automatically.
         viewModelScope.launch {
             preferencesRepository.isDemoMode.collect { isDemo ->
                 _uiState.update { it.copy(hasCredentials = !isDemo, isDemoMode = isDemo) }
-                // Cache wipe is handled by the repository (via
-                // UserPreferencesRepository.saveCredentials) and the
-                // observe* methods react to credential changes automatically.
-                dataJob?.cancel()
-                dataJob = loadData(_selectedRange.value)
             }
         }
         viewModelScope.launch {
@@ -110,12 +109,71 @@ class DashboardViewModel @Inject constructor(
                 recomputeZoneBreakdown()
             }
         }
-        // Skip the initial emission — the hasCredentials collector above
-        // handles the first loadData. Only react to actual range changes.
+        // Single data-loading pipeline. flatMapLatest cancels the previous
+        // inner flow when the range changes, so stale emissions from old
+        // ranges never reach the collector — no epoch counter needed.
         viewModelScope.launch {
-            _selectedRange.drop(1).collectLatest { range ->
-                dataJob?.cancel()
-                dataJob = loadData(range)
+            _selectedRange.flatMapLatest { range ->
+                val (start, end) = getDateRange(range)
+                flow {
+                    // Emit loading state immediately so the chart shows a
+                    // spinner while real data is being fetched.
+                    emit(range to null)
+                    // Collect real data from the repository. The inner
+                    // combine of prices + consumption flows drives emissions.
+                    val channel = Channel<Pair<DateRangeSelection, List<HalfHourPoint>>>(Channel.CONFLATED)
+                    coroutineScope {
+                        launch {
+                            getDashboardDataUseCase(start, end).collectLatest { points ->
+                                channel.send(range to points)
+                            }
+                        }
+                        launch {
+                            repository.observeStandingCharges(start, end).collectLatest { charges ->
+                                _uiState.update {
+                                    it.copy(standingChargeCost = computeStandingChargeCost(charges, start, end))
+                                }
+                                recalculateTotalCost()
+                            }
+                        }
+                        launch {
+                            val refreshResult = refreshDashboardDataUseCase(start, end)
+                            if (refreshResult.isFailure && _uiState.value.points.isEmpty()) {
+                                _uiState.update {
+                                    it.copy(error = refreshResult.exceptionOrNull()?.message ?: "Failed to refresh")
+                                }
+                            }
+                        }
+                        launch {
+                            repository.fetchFlexiblePrice().onSuccess { price ->
+                                _uiState.update { it.copy(flexiblePrice = price) }
+                                preferencesRepository.saveFlexiblePriceCache(price)
+                                recomputeZoneBreakdown()
+                            }.onFailure { e ->
+                                android.util.Log.w("DashboardViewModel", "Failed to fetch flexible price", e)
+                            }
+                        }
+                        for (pair in channel) emit(pair)
+                    }
+                }
+            }.collectLatest { (range, points) ->
+                if (points == null) {
+                    // Loading placeholder — show spinner over the chart
+                    val (start, end) = getDateRange(range)
+                    _uiState.update {
+                        it.copy(
+                            isLoading = it.points.isEmpty(),
+                            isChartLoading = true,
+                            error = null,
+                            selectedRange = range,
+                            displayChartPoints = it.chartPoints.ifEmpty {
+                                generatePlaceholderPoints(start, end)
+                            }
+                        )
+                    }
+                } else {
+                    updateDashboardWithPoints(points, range)
+                }
             }
         }
     }
@@ -125,9 +183,8 @@ class DashboardViewModel @Inject constructor(
     }
 
     fun onRefresh() {
-        dataJob?.cancel()
         val range = _selectedRange.value
-        dataJob = viewModelScope.launch {
+        viewModelScope.launch {
             _uiState.update { it.copy(isRefreshing = true, error = null) }
             val (start, end) = getDateRange(range)
             coroutineScope {
@@ -175,72 +232,12 @@ class DashboardViewModel @Inject constructor(
         _uiState.update { it.copy(error = null) }
     }
 
-    /**
-     * Single, source-agnostic load path. The unified cache stores handle
-     * demo/real branching internally, so this function:
-     *
-     *  1. Starts the dashboard flow (which reads from the unified cache
-     *     stores) and the standing-charge flow.
-     *  2. Triggers a refresh in the background — the cache stores route
-     *     to the correct data source based on [UserPreferencesRepository.isDemoMode].
-     */
-    private fun loadData(range: DateRangeSelection): Job {
-        return viewModelScope.launch {
-            val (start, end) = getDateRange(range)
-
-            _uiState.update {
-                it.copy(
-                    isLoading = it.points.isEmpty(),
-                    error = null,
-                    selectedRange = range,
-                    // isDemoMode is set by the hasCredentials collector
-                    // Show placeholder points immediately so the chart renders
-                    // the time range even before data arrives.
-                    displayChartPoints = it.chartPoints.ifEmpty {
-                        generatePlaceholderPoints(start, end)
-                    }
-                )
-            }
-
-            coroutineScope {
-                // Observe the dashboard flow. The cache stores
-                // automatically trigger getConsumption when collected,
-                // handling demo/real branching and gap detection internally.
-                launch {
-                    getDashboardDataUseCase(start, end).collectLatest { points ->
-                        updateDashboardWithPoints(points, start, end)
-                    }
-                }
-
-                // Observe standing charges and compute the standing charge cost.
-                launch {
-                    repository.observeStandingCharges(start, end).collectLatest { charges ->
-                        _uiState.update { it.copy(standingChargeCost = computeStandingChargeCost(charges, start, end)) }
-                        recalculateTotalCost()
-                    }
-                }
-
-                // Refresh prices and standing charges in the background.
-                // Consumption auto-loads via the dashboard flow observation.
-                val refreshResult = refreshDashboardDataUseCase(start, end)
-                // Guard against setting stale errors on a cancelled coroutine —
-                // the CancellationException rethrow in fetchAndPersist* should
-                // prevent this, but this check is defence-in-depth.
-                if (refreshResult.isFailure && _uiState.value.points.isEmpty() && coroutineContext.isActive) {
-                    _uiState.update {
-                        it.copy(error = refreshResult.exceptionOrNull()?.message ?: "Failed to refresh")
-                    }
-                }
-            }
-        }
-    }
-
     /** Update dashboard UI state with the given [HalfHourPoint]s. */
     private fun updateDashboardWithPoints(
         points: List<HalfHourPoint>,
-        start: Instant,
-        end: Instant
+        range: DateRangeSelection
     ) {
+        val (start, end) = getDateRange(range)
         val prices = points.mapNotNull { it.priceIncVat }
         val usageCost = points.sumOf { it.costIncVat ?: 0.0 }
         val totalKwh = points.sumOf { it.consumptionKwh ?: 0.0 }
@@ -258,6 +255,7 @@ class DashboardViewModel @Inject constructor(
         _uiState.update {
             it.copy(
                 isLoading = false,
+                isChartLoading = false,
                 points = points,
                 chartPoints = trimmed,
                 displayChartPoints = displayPoints,
