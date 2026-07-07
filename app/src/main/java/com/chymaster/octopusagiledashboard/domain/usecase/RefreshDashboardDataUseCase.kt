@@ -18,12 +18,13 @@ class RefreshDashboardDataUseCase @Inject constructor(
             // Standing charges are optional — don't fail if they error
             standingChargesResult.await()
 
-            // Prices are required; empty list means failure
-            if (prices.isEmpty()) {
-                Result.failure(Exception("Failed to load prices"))
-            } else {
-                Result.success(Unit)
-            }
+            // Propagate the repository's error (e.g. ApiError.Unauthorized,
+            // ApiError.NetworkError) rather than inventing a generic message.
+            // A successful call returning an empty list is NOT an error.
+            prices.fold(
+                onSuccess = { Result.success(Unit) },
+                onFailure = { Result.failure(it) }
+            )
         }
     }
 }

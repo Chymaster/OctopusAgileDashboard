@@ -7,6 +7,7 @@ import com.chymaster.octopusagiledashboard.data.repository.OctopusRepository
 import com.chymaster.octopusagiledashboard.domain.model.DateRangeSelection
 import com.chymaster.octopusagiledashboard.domain.model.HalfHourPoint
 import com.chymaster.octopusagiledashboard.domain.model.StandingCharge
+import com.chymaster.octopusagiledashboard.domain.model.toUserMessage
 import com.chymaster.octopusagiledashboard.ui.chart.BinnedPoint
 import com.chymaster.octopusagiledashboard.ui.chart.trimMissingConsumption
 import com.chymaster.octopusagiledashboard.domain.model.TimeRangePreset
@@ -59,6 +60,7 @@ data class DashboardUiState(
     val minPrice: Double? = null,
     val maxPrice: Double? = null,
     val flexiblePrice: Double? = null,
+    val flexiblePriceError: String? = null,
     val showCostBreakdown: Boolean = false,
     // Usage zone breakdown
     val cheapThresholdPercent: Int = PriceColors.DEFAULT_CHEAP_PERCENT,
@@ -146,11 +148,12 @@ class DashboardViewModel @Inject constructor(
                         }
                         launch {
                             repository.fetchFlexiblePrice().onSuccess { price ->
-                                _uiState.update { it.copy(flexiblePrice = price) }
+                                _uiState.update { it.copy(flexiblePrice = price, flexiblePriceError = null) }
                                 preferencesRepository.saveFlexiblePriceCache(price)
                                 recomputeZoneBreakdown()
                             }.onFailure { e ->
                                 android.util.Log.w("DashboardViewModel", "Failed to fetch flexible price", e)
+                                _uiState.update { it.copy(flexiblePriceError = e.toUserMessage()) }
                             }
                         }
                         for (pair in channel) emit(pair)
@@ -199,18 +202,19 @@ class DashboardViewModel @Inject constructor(
                     _uiState.update {
                         it.copy(
                             isRefreshing = false,
-                            error = result.exceptionOrNull()?.message ?: "Refresh failed"
+                            error = result.exceptionOrNull()?.toUserMessage() ?: "Refresh failed"
                         )
                     }
                 } else {
                     _uiState.update { it.copy(isRefreshing = false) }
                 }
                 flexibleJob.await().onSuccess { price ->
-                    _uiState.update { it.copy(flexiblePrice = price) }
+                    _uiState.update { it.copy(flexiblePrice = price, flexiblePriceError = null) }
                     preferencesRepository.saveFlexiblePriceCache(price)
                     recomputeZoneBreakdown()
                 }.onFailure { e ->
                     android.util.Log.w("DashboardViewModel", "Failed to fetch flexible price", e)
+                    _uiState.update { it.copy(flexiblePriceError = e.toUserMessage()) }
                 }
             }
         }
@@ -230,6 +234,10 @@ class DashboardViewModel @Inject constructor(
 
     fun clearError() {
         _uiState.update { it.copy(error = null) }
+    }
+
+    fun clearFlexiblePriceError() {
+        _uiState.update { it.copy(flexiblePriceError = null) }
     }
 
     /** Update dashboard UI state with the given [HalfHourPoint]s. */

@@ -15,6 +15,7 @@ import com.chymaster.octopusagiledashboard.data.remote.dto.AgileRateDto
 import com.chymaster.octopusagiledashboard.data.remote.dto.ConsumptionDto
 import com.chymaster.octopusagiledashboard.data.remote.dto.PaginatedResponse
 import com.chymaster.octopusagiledashboard.domain.model.AgilePrice
+import com.chymaster.octopusagiledashboard.domain.model.ApiError
 import com.chymaster.octopusagiledashboard.domain.model.ConsumptionRecord
 import com.chymaster.octopusagiledashboard.domain.model.HalfHourPoint
 import com.chymaster.octopusagiledashboard.domain.model.StandingCharge
@@ -98,16 +99,6 @@ class OctopusRepositoryImpl @Inject constructor(
             .flowOn(Dispatchers.IO)
     }
 
-    override fun observeAgilePriceEntities(start: Instant, end: Instant): Flow<List<AgilePriceEntity>> {
-        val startMs = start.toEpochMilli()
-        val endMs = end.toEpochMilli()
-        return _agilePrices
-            .map { entities ->
-                entities.filter { it.validFrom >= startMs && it.validTo <= endMs }
-            }
-            .flowOn(Dispatchers.IO)
-    }
-
     override fun observeConsumption(start: Instant, end: Instant): Flow<List<ConsumptionRecord>> =
         channelFlow {
             val startMs = start.toEpochMilli()
@@ -115,7 +106,13 @@ class OctopusRepositoryImpl @Inject constructor(
 
             // Trigger data loading in the background. This populates the
             // in-memory StateFlow which the observation below reacts to.
-            launch(Dispatchers.IO) { getConsumption(start, end) }
+            launch(Dispatchers.IO) {
+                getConsumption(start, end).onFailure { e ->
+                    if (e !is kotlinx.coroutines.CancellationException) {
+                        android.util.Log.w("OctopusRepo", "Background consumption fetch failed", e)
+                    }
+                }
+            }
 
             _consumption
                 .map { entities ->
@@ -127,15 +124,32 @@ class OctopusRepositoryImpl @Inject constructor(
         }.flowOn(Dispatchers.IO)
 
     override fun observeDashboardData(start: Instant, end: Instant): Flow<List<HalfHourPoint>> {
-        val pricesFlow = observeAgilePriceEntities(start, end)
-            .distinctUntilChanged()
+        // Trigger price loading in the background — populates the in-memory
+        // cache that observeAgilePrices watches.
+        val pricesFlow = channelFlow {
+            launch(Dispatchers.IO) {
+                getAgilePrices(start, end).onFailure { e ->
+                    if (e !is kotlinx.coroutines.CancellationException) {
+                        android.util.Log.w("OctopusRepo", "Background price fetch failed", e)
+                    }
+                }
+            }
+            observeAgilePrices(start, end)
+                .collect { send(it) }
+        }.distinctUntilChanged()
 
         val consumptionFlow = channelFlow {
             val startMs = start.toEpochMilli()
             val endMs = end.toEpochMilli()
 
             // Trigger data loading in the background.
-            launch(Dispatchers.IO) { getConsumption(start, end) }
+            launch(Dispatchers.IO) {
+                getConsumption(start, end).onFailure { e ->
+                    if (e !is kotlinx.coroutines.CancellationException) {
+                        android.util.Log.w("OctopusRepo", "Background consumption fetch failed", e)
+                    }
+                }
+            }
 
             _consumption
                 .map { entities ->
@@ -164,13 +178,15 @@ class OctopusRepositoryImpl @Inject constructor(
     /**
      * Get agile prices for [start]..[end].
      *
-     * 1. If the in-memory cache already covers the full range, return immediately.
-     * 2. Otherwise query Room.
-     * 3. If Room is empty for this range, fetch from the API, persist to Room,
-     *    then query Room again.
-     * 4. Merge results into the in-memory cache.
+     * Tiered cache strategy:
+     * 1. In-memory cache — if it covers the full range, return immediately.
+     * 2. Room — count expected vs actual slots.
+     *    a. All present → read from Room.
+     *    b. None present → fetch entire range from API, persist, re-query Room.
+     *    c. Partial → detect and fill gaps from API, re-query Room.
+     * 3. Merge results into the in-memory cache.
      */
-    override suspend fun getAgilePrices(start: Instant, end: Instant): List<AgilePrice> {
+    override suspend fun getAgilePrices(start: Instant, end: Instant): Result<List<AgilePrice>> {
         return withContext(Dispatchers.IO) {
             // Demo mode → generate synthetic prices, persist, return.
             val isDemo = preferencesRepository.isDemoMode.first()
@@ -179,10 +195,10 @@ class OctopusRepositoryImpl @Inject constructor(
                 val generated = DemoDataGenerator.generateAgilePriceEntities(start, end, tariffCode)
                 agilePriceDao.insertAll(generated)
                 mergeAndEmitAgilePrices(generated, start, end)
-                return@withContext generated.map { it.toDomain() }
+                return@withContext Result.success(generated.map { it.toDomain() })
             }
 
-            // Fast path: in-memory cache already covers the range
+            // Tier 1: in-memory cache
             val currentStart = cachedPricesStart
             val currentEnd = cachedPricesEnd
             if (currentStart != null && currentEnd != null &&
@@ -190,25 +206,41 @@ class OctopusRepositoryImpl @Inject constructor(
             ) {
                 val cached = _agilePrices.value
                     .filter { it.validFrom >= start.toEpochMilli() && it.validTo <= end.toEpochMilli() }
-                return@withContext cached.map { it.toDomain() }
+                return@withContext Result.success(cached.map { it.toDomain() })
             }
 
-            // Query Room
-            val roomEntities = agilePriceDao.queryRange(start.toEpochMilli(), end.toEpochMilli())
-            val entities = if (roomEntities.isEmpty()) {
-                // Room empty — fetch from API, persist, query again
+            // Tier 2: Room — check coverage
+            val startMs = start.toEpochMilli()
+            val endMs = end.toEpochMilli()
+            val expectedCount = ((endMs - startMs) / HALF_HOUR_MILLIS).toInt()
+
+            if (expectedCount <= 0) {
+                mergeAndEmitAgilePrices(emptyList(), start, end)
+                return@withContext Result.success(emptyList())
+            }
+
+            val actualCount = agilePriceDao.countInRange(startMs, endMs)
+            val entities = if (actualCount >= expectedCount) {
+                // Room has everything — read directly.
+                agilePriceDao.queryRange(startMs, endMs)
+            } else if (actualCount == 0) {
+                // Tier 3a: Room empty — fetch entire range from API.
                 val apiResult = fetchAndPersistAgilePrices(start, end)
                 if (apiResult.isSuccess) {
-                    agilePriceDao.queryRange(start.toEpochMilli(), end.toEpochMilli())
+                    agilePriceDao.queryRange(startMs, endMs)
                 } else {
-                    emptyList()
+                    return@withContext Result.failure(
+                        apiResult.exceptionOrNull() ?: ApiError.NoDataError()
+                    )
                 }
             } else {
-                roomEntities
+                // Tier 3b: partial data — detect and fill gaps.
+                fillAgilePriceGaps(start, end)
+                agilePriceDao.queryRange(startMs, endMs)
             }
 
             mergeAndEmitAgilePrices(entities, start, end)
-            entities.map { it.toDomain() }
+            Result.success(entities.map { it.toDomain() })
         }
     }
 
@@ -226,14 +258,14 @@ class OctopusRepositoryImpl @Inject constructor(
      * 5. If Room has partial data, detect and fill gaps from the API, then re-query Room.
      * 6. Merge results into the in-memory cache.
      */
-    override suspend fun getConsumption(start: Instant, end: Instant): List<ConsumptionRecord> {
+    override suspend fun getConsumption(start: Instant, end: Instant): Result<List<ConsumptionRecord>> {
         return withContext(Dispatchers.IO) {
             val isDemo = preferencesRepository.isDemoMode.first()
             if (isDemo) {
                 val generated = DemoDataGenerator.generateConsumptionEntities(start, end)
                 consumptionDao.insertAll(generated)
                 mergeAndEmitConsumption(generated, start, end)
-                return@withContext generated.map { it.toDomain() }
+                return@withContext Result.success(generated.map { it.toDomain() })
             }
 
             val mpan = preferencesRepository.mpanFlow.first() ?: ""
@@ -243,7 +275,7 @@ class OctopusRepositoryImpl @Inject constructor(
 
             if (expectedCount <= 0) {
                 mergeAndEmitConsumption(emptyList(), start, end)
-                return@withContext emptyList()
+                return@withContext Result.success(emptyList())
             }
 
             // Tier 1: in-memory cache
@@ -254,7 +286,7 @@ class OctopusRepositoryImpl @Inject constructor(
             ) {
                 val cached = _consumption.value
                     .filter { it.intervalStart >= startMs && it.intervalStart < endMs }
-                return@withContext cached.map { it.toDomain() }
+                return@withContext Result.success(cached.map { it.toDomain() })
             }
 
             // Tier 2: Room
@@ -268,7 +300,9 @@ class OctopusRepositoryImpl @Inject constructor(
                 if (apiResult.isSuccess) {
                     consumptionDao.queryRange(mpan, startMs, endMs)
                 } else {
-                    emptyList()
+                    return@withContext Result.failure(
+                        apiResult.exceptionOrNull() ?: ApiError.NoDataError()
+                    )
                 }
             } else {
                 // Tier 3b: partial data — detect and fill gaps.
@@ -277,7 +311,7 @@ class OctopusRepositoryImpl @Inject constructor(
             }
 
             mergeAndEmitConsumption(entities, start, end)
-            entities.map { it.toDomain() }
+            Result.success(entities.map { it.toDomain() })
         }
     }
 
@@ -307,13 +341,17 @@ class OctopusRepositoryImpl @Inject constructor(
                 val response = apiService.getMeterPoint(mpan)
                 if (response.isSuccessful) {
                     val body = response.body()
-                        ?: return@withContext Result.failure(Exception("Empty response"))
+                        ?: return@withContext Result.failure(ApiError.NoDataError("Empty response"))
                     Result.success(body.gsp)
                 } else {
-                    Result.failure(Exception("API error: ${response.code()}"))
+                    Result.failure(ApiError.fromHttpCode(response.code()))
                 }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
+            } catch (e: ApiError) {
+                Result.failure(e)
+            } catch (e: java.io.IOException) {
+                Result.failure(ApiError.NetworkError(cause = e))
             } catch (e: Exception) {
                 Result.failure(e)
             }
@@ -374,7 +412,7 @@ class OctopusRepositoryImpl @Inject constructor(
                     }
 
                     if (!response.isSuccessful) {
-                        lastError = Exception("API error: ${response.code()} ${response.message()}")
+                        lastError = ApiError.fromHttpCode(response.code())
                         continue
                     }
 
@@ -399,6 +437,10 @@ class OctopusRepositoryImpl @Inject constructor(
                 )
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
+            } catch (e: ApiError) {
+                Result.failure(e)
+            } catch (e: java.io.IOException) {
+                Result.failure(ApiError.NetworkError(cause = e))
             } catch (e: Exception) {
                 Result.failure(e)
             }
@@ -409,15 +451,19 @@ class OctopusRepositoryImpl @Inject constructor(
         return withContext(Dispatchers.IO) {
             try {
                 val mpan = preferencesRepository.mpanFlow.first()
-                    ?: return@withContext Result.failure(Exception("MPAN not configured"))
+                    ?: return@withContext Result.failure(ApiError.NoDataError("MPAN not configured"))
                 val response = apiService.getMeterPoint(mpan)
                 if (response.isSuccessful) {
                     Result.success(Unit)
                 } else {
-                    Result.failure(Exception("Connection failed: ${response.code()}"))
+                    Result.failure(ApiError.fromHttpCode(response.code()))
                 }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
+            } catch (e: ApiError) {
+                Result.failure(e)
+            } catch (e: java.io.IOException) {
+                Result.failure(ApiError.NetworkError(cause = e))
             } catch (e: Exception) {
                 Result.failure(e)
             }
@@ -425,21 +471,21 @@ class OctopusRepositoryImpl @Inject constructor(
     }
 
     /**
-     * Combine a list of [AgilePriceEntity] with a list of [ConsumptionEntity]
+     * Combine a list of [AgilePrice] with a list of [ConsumptionEntity]
      * into the [HalfHourPoint]s the chart expects. Always start from prices
      * and merge in the matching consumption row by `intervalStart` (== price
-     * `validFrom`).
+     * `validFrom` as epoch millis).
      */
     private fun buildHalfHourPoints(
-        prices: List<AgilePriceEntity>,
+        prices: List<AgilePrice>,
         consumption: List<ConsumptionEntity>
     ): List<HalfHourPoint> {
         val consumptionMap = consumption.associate { it.intervalStart to it }
         return prices.map { price ->
-            val cons = consumptionMap[price.validFrom]
+            val cons = consumptionMap[price.validFrom.toEpochMilli()]
             HalfHourPoint(
-                intervalStart = Instant.ofEpochMilli(price.validFrom),
-                intervalEnd = Instant.ofEpochMilli(price.validTo),
+                intervalStart = price.validFrom,
+                intervalEnd = price.validTo,
                 priceIncVat = price.priceIncVat,
                 consumptionKwh = cons?.consumption,
                 costIncVat = if (cons != null) cons.consumption * price.priceIncVat else null
@@ -492,6 +538,10 @@ class OctopusRepositoryImpl @Inject constructor(
             Result.success(Unit)
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
+        } catch (e: ApiError) {
+            Result.failure(e)
+        } catch (e: java.io.IOException) {
+            Result.failure(ApiError.NetworkError(cause = e))
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -528,7 +578,7 @@ class OctopusRepositoryImpl @Inject constructor(
         do {
             val response = request(url)
             if (!response.isSuccessful) {
-                throw Exception("API error: ${response.code()} ${response.message()}")
+                throw ApiError.fromHttpCode(response.code())
             }
             val body = response.body() ?: break
             allRates.addAll(body.results)
@@ -584,6 +634,10 @@ class OctopusRepositoryImpl @Inject constructor(
             Result.success(Unit)
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
+        } catch (e: ApiError) {
+            Result.failure(e)
+        } catch (e: java.io.IOException) {
+            Result.failure(ApiError.NetworkError(cause = e))
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -623,7 +677,7 @@ class OctopusRepositoryImpl @Inject constructor(
         do {
             val response = request(url)
             if (!response.isSuccessful) {
-                throw Exception("API error: ${response.code()} ${response.message()}")
+                throw ApiError.fromHttpCode(response.code())
             }
             val body = response.body() ?: break
             allItems.addAll(body.results)
@@ -668,6 +722,45 @@ class OctopusRepositoryImpl @Inject constructor(
         // Fetch each gap synchronously — one at a time.
         for ((gStart, gEnd) in gaps) {
             fetchAndPersistConsumption(gStart, gEnd)
+            // Continue even on failure — partial fill is better than nothing.
+        }
+    }
+
+    /**
+     * Detect and fill gaps in Room agile price data for [start]..[end].
+     * Identifies contiguous blocks of missing half-hour slots and fetches
+     * each block from the API synchronously (one at a time).
+     */
+    private suspend fun fillAgilePriceGaps(start: Instant, end: Instant) {
+        val startMs = start.toEpochMilli()
+        val endMs = end.toEpochMilli()
+
+        val existingSlots = agilePriceDao.queryRange(startMs, endMs)
+            .map { it.validFrom }
+            .toSet()
+
+        // Find contiguous missing blocks.
+        val gaps = mutableListOf<Pair<Instant, Instant>>()
+        var gapStart: Instant? = null
+        var t = start
+        while (!t.isAfter(end)) {
+            if (t.toEpochMilli() !in existingSlots) {
+                if (gapStart == null) gapStart = t
+            } else {
+                if (gapStart != null) {
+                    gaps.add(gapStart to t)
+                    gapStart = null
+                }
+            }
+            t = t.plusMillis(HALF_HOUR_MILLIS)
+        }
+        if (gapStart != null) {
+            gaps.add(gapStart to end)
+        }
+
+        // Fetch each gap synchronously — one at a time.
+        for ((gStart, gEnd) in gaps) {
+            fetchAndPersistAgilePrices(gStart, gEnd)
             // Continue even on failure — partial fill is better than nothing.
         }
     }

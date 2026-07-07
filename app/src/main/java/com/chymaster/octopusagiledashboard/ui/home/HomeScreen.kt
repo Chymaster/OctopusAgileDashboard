@@ -64,6 +64,13 @@ fun HomeScreen(
         }
     }
 
+    LaunchedEffect(uiState.flexiblePriceError) {
+        uiState.flexiblePriceError?.let {
+            snackbarHostState.showSnackbar(it)
+            viewModel.clearFlexiblePriceError()
+        }
+    }
+
     val cardShape = RoundedCornerShape(16.dp)
     val cardColors = CardDefaults.cardColors(
         containerColor = MaterialTheme.colorScheme.surfaceContainerHigh

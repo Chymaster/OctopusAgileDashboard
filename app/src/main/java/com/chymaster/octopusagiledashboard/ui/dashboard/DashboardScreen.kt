@@ -73,6 +73,13 @@ fun DashboardScreen(
         }
     }
 
+    LaunchedEffect(uiState.flexiblePriceError) {
+        uiState.flexiblePriceError?.let {
+            snackbarHostState.showSnackbar(it)
+            viewModel.clearFlexiblePriceError()
+        }
+    }
+
     if (showDatePicker) {
         CustomDatePickerDialog(
             onRangeSelected = { startDate, endDate ->

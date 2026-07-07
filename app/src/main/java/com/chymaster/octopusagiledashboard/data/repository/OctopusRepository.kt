@@ -1,6 +1,5 @@
 package com.chymaster.octopusagiledashboard.data.repository
 
-import com.chymaster.octopusagiledashboard.data.local.entity.AgilePriceEntity
 import com.chymaster.octopusagiledashboard.domain.model.AgilePrice
 import com.chymaster.octopusagiledashboard.domain.model.ConsumptionRecord
 import com.chymaster.octopusagiledashboard.domain.model.HalfHourPoint
@@ -12,13 +11,6 @@ interface OctopusRepository {
 
     fun observeAgilePrices(start: Instant, end: Instant): Flow<List<AgilePrice>>
 
-    /**
-     * Observe raw [AgilePriceEntity] objects for [start]..[end].
-     * Used internally for [observeDashboardData] which needs entity-level access
-     * to build [HalfHourPoint]s.
-     */
-    fun observeAgilePriceEntities(start: Instant, end: Instant): Flow<List<AgilePriceEntity>>
-
     fun observeConsumption(start: Instant, end: Instant): Flow<List<ConsumptionRecord>>
 
     fun observeDashboardData(start: Instant, end: Instant): Flow<List<HalfHourPoint>>
@@ -29,11 +21,11 @@ interface OctopusRepository {
      * Get agile prices for [start]..[end].
      * Checks in-memory cache first, then Room, then fetches from the API only
      * if Room has no data for the requested range.
-     * Returns the list of prices (empty on failure).
+     * Returns [Result.failure] with an [ApiError] on API/network failure.
      */
-    suspend fun getAgilePrices(start: Instant, end: Instant): List<AgilePrice>
+    suspend fun getAgilePrices(start: Instant, end: Instant): Result<List<AgilePrice>>
 
-    suspend fun getConsumption(start: Instant, end: Instant): List<ConsumptionRecord>
+    suspend fun getConsumption(start: Instant, end: Instant): Result<List<ConsumptionRecord>>
 
     suspend fun refreshStandingCharges(start: Instant, end: Instant): Result<Unit>
 
