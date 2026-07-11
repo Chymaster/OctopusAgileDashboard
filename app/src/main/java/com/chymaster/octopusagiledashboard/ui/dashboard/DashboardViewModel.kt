@@ -68,6 +68,9 @@ data class DashboardUiState(
     val greenUsageKwh: Double = 0.0,
     val amberUsageKwh: Double = 0.0,
     val redUsageKwh: Double = 0.0,
+    val greenUsageCost: Double = 0.0,
+    val amberUsageCost: Double = 0.0,
+    val redUsageCost: Double = 0.0,
     val showUsageBreakdown: Boolean = false,
     /** True while the chart is waiting for real data after a range change or refresh. */
     val isChartLoading: Boolean = true
@@ -186,6 +189,9 @@ class DashboardViewModel @Inject constructor(
                 greenUsageKwh = 0.0,
                 amberUsageKwh = 0.0,
                 redUsageKwh = 0.0,
+                greenUsageCost = 0.0,
+                amberUsageCost = 0.0,
+                redUsageCost = 0.0,
                 displayChartPoints = generatePlaceholderPoints(start, end)
             )
         }
@@ -304,21 +310,37 @@ class DashboardViewModel @Inject constructor(
         var greenKwh = 0.0
         var amberKwh = 0.0
         var redKwh = 0.0
+        var greenCost = 0.0
+        var amberCost = 0.0
+        var redCost = 0.0
         for (point in state.points) {
             val price = point.priceIncVat ?: continue
             val kwh = point.consumptionKwh ?: continue
+            val cost = point.costIncVat ?: 0.0
             if (kwh <= 0) continue
             when (PriceColors.priceColor(price, refPrice, cheapPct, moderatePct)) {
-                PriceColors.Cheap -> greenKwh += kwh
-                PriceColors.Expensive -> redKwh += kwh
-                else -> amberKwh += kwh
+                PriceColors.Cheap -> {
+                    greenKwh += kwh
+                    greenCost += cost
+                }
+                PriceColors.Expensive -> {
+                    redKwh += kwh
+                    redCost += cost
+                }
+                else -> {
+                    amberKwh += kwh
+                    amberCost += cost
+                }
             }
         }
         _uiState.update {
             it.copy(
                 greenUsageKwh = greenKwh,
                 amberUsageKwh = amberKwh,
-                redUsageKwh = redKwh
+                redUsageKwh = redKwh,
+                greenUsageCost = greenCost,
+                amberUsageCost = amberCost,
+                redUsageCost = redCost
             )
         }
     }
