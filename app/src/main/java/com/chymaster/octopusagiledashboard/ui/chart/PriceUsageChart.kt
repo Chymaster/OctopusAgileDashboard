@@ -1,31 +1,20 @@
 package com.chymaster.octopusagiledashboard.ui.chart
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ZoomIn
-import androidx.compose.material.icons.filled.ZoomOut
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -38,19 +27,24 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 /**
- * Dual-axis chart that overlays price (bars, LEFT Y axis in pence/kWh)
- * and usage (line, RIGHT Y axis in kWh) on a shared time axis.
+ * Dual-axis chart that shows usage bars (stacked green/amber/red by price zone,
+ * LEFT Y axis in kWh) with an average-price line overlay (RIGHT Y axis in
+ * pence/kWh) on a shared time axis.
  *
- * Price bars are ratio-coloured against [referencePrice] (the Flexible Octopus
- * tariff): green if < 70 %, amber if 70–130 %, red if > 130 %. When
- * [referencePrice] is null the bars fall back to amber.
+ * Zone classification uses [referencePrice] (the Flexible Octopus tariff) and
+ * the user-configurable [cheapThresholdPercent]/[moderateThresholdPercent]
+ * thresholds from settings.
  */
 @Composable
 fun PriceUsageChart(
     points: List<HalfHourPoint>,
     referencePrice: Double?,
+    cheapThresholdPercent: Int = PriceColors.DEFAULT_CHEAP_PERCENT,
+    moderateThresholdPercent: Int = PriceColors.DEFAULT_MODERATE_PERCENT,
     onPointTapped: (BinnedPoint?) -> Unit,
     modifier: Modifier = Modifier,
+    useCalendarMonthBinning: Boolean = false,
+    useCalendarDayBinning: Boolean = false,
 ) {
     if (points.isEmpty()) return
 
@@ -58,105 +52,140 @@ fun PriceUsageChart(
     val trimmedPoints = remember(points) { points.trimMissingConsumption() }
     if (trimmedPoints.isEmpty()) return
 
-    var isZoomed by remember { mutableStateOf(false) }
-
-    // Auto-bin to keep bar count ≤ 20
-    val binnedPoints = remember(trimmedPoints) { binPoints(trimmedPoints) }
-    val useBinned = !isZoomed && binnedPoints.size < trimmedPoints.size
+    // Auto-bin to keep bar count ≤ 20, or use calendar-month binning for 6M/1Y ranges.
+    // Zone-aware overloads classify each half-hour point and accumulate per-zone consumption.
+    val binnedPoints = remember(
+        trimmedPoints, useCalendarMonthBinning, useCalendarDayBinning, referencePrice,
+        cheapThresholdPercent, moderateThresholdPercent
+    ) {
+        if (useCalendarDayBinning)
+            binPointsByCalendarDay(trimmedPoints, referencePrice, cheapThresholdPercent, moderateThresholdPercent)
+        else if (useCalendarMonthBinning)
+            binPointsByCalendarMonth(trimmedPoints, referencePrice, cheapThresholdPercent, moderateThresholdPercent)
+        else
+            binPoints(trimmedPoints, referencePrice, cheapThresholdPercent, moderateThresholdPercent)
+    }
+    val useBinned = binnedPoints.size < trimmedPoints.size
     val displayData = if (useBinned) binnedPoints else null
 
     val londonZone = ZoneId.of("Europe/London")
     val timeFormatter = DateTimeFormatter.ofPattern("HH:mm", Locale.UK)
+    val dayFormatter = DateTimeFormatter.ofPattern("dd/MM", Locale.UK)
+    val monthFormatter = DateTimeFormatter.ofPattern("MMM", Locale.UK)
 
-    // Build ChartBar list (price values for bars)
-    val bars = remember(displayData, trimmedPoints, useBinned) {
+    // Build ChartBar list — bars now represent total consumption per interval
+    // with stacked green/amber/red segments for the zone breakdown.
+    val bars = remember(displayData, trimmedPoints, useBinned, useCalendarMonthBinning, useCalendarDayBinning) {
         if (useBinned && displayData != null) {
             displayData.map { bin ->
+                val label = when {
+                    useCalendarMonthBinning ->
+                        bin.intervalStart.atZone(londonZone).format(monthFormatter)
+                    useCalendarDayBinning ->
+                        bin.intervalStart.atZone(londonZone).format(dayFormatter)
+                    else ->
+                        bin.intervalStart.atZone(londonZone).format(timeFormatter)
+                }
                 ChartBar(
-                    label = bin.intervalStart.atZone(londonZone).format(timeFormatter),
-                    value = bin.avgPrice ?: 0.0,
+                    label = label,
+                    value = bin.totalConsumption ?: 0.0,
                     intervalStart = bin.intervalStart,
-                    intervalEnd = bin.intervalEnd
+                    intervalEnd = bin.intervalEnd,
+                    greenSegment = bin.greenConsumption,
+                    amberSegment = bin.amberConsumption,
+                    redSegment = bin.redConsumption,
                 )
             }
         } else {
             trimmedPoints.map { p ->
+                val kwh = p.consumptionKwh ?: 0.0
+                val zone = PriceColors.priceColor(
+                    p.priceIncVat ?: 0.0, referencePrice,
+                    cheapThresholdPercent, moderateThresholdPercent
+                )
                 ChartBar(
                     label = p.intervalStart.atZone(londonZone).format(timeFormatter),
-                    value = p.priceIncVat ?: 0.0,
+                    value = kwh,
                     intervalStart = p.intervalStart,
-                    intervalEnd = p.intervalEnd
+                    intervalEnd = p.intervalEnd,
+                    greenSegment = if (zone == PriceColors.Cheap) kwh else 0.0,
+                    amberSegment = if (zone == PriceColors.Moderate) kwh else 0.0,
+                    redSegment = if (zone == PriceColors.Expensive) kwh else 0.0,
                 )
             }
         }
     }
 
-    // Per-bar colors based on price ratio
-    val barColors = remember(bars, referencePrice) {
-        bars.map { bar ->
-            PriceColors.priceColor(bar.value, referencePrice)
-        }
-    }
-
-    // Usage line values
-    val usageValues = remember(displayData, trimmedPoints, useBinned) {
+    // Price overlay line values (swapped: was usage line, now price line)
+    val priceLineValues = remember(displayData, trimmedPoints, useBinned) {
         if (useBinned && displayData != null) {
-            displayData.map { it.totalConsumption ?: 0.0 }
+            displayData.map { it.avgPrice ?: 0.0 }
         } else {
-            trimmedPoints.map { it.consumptionKwh ?: 0.0 }
+            trimmedPoints.map { it.priceIncVat ?: 0.0 }
         }
     }
 
-    // Compute aligned Y ranges so zero sits at the same position on both axes
-    val priceYs = bars.map { it.value }
-    val (priceMin, priceMax, usageMin, usageMax) = remember(priceYs, usageValues) {
-        computeAlignedRanges(priceYs, usageValues)
+    // Compute Y ranges for consumption bars (left axis, always from zero)
+    val consumptionMax = bars.maxOfOrNull { it.value } ?: 1.0
+    val consumptionYMin = 0.0
+    val consumptionYMax = consumptionMax * 1.1
+
+    // Compute Y ranges for price overlay line (right axis)
+    val priceYMin = remember(priceLineValues) {
+        val min = priceLineValues.minOrNull() ?: 0.0
+        if (min < 0) min * 1.1 else 0.0
+    }
+    val priceYMax = remember(priceLineValues) {
+        (priceLineValues.maxOrNull() ?: 1.0) * 1.1
     }
 
-    val isScrollable = isZoomed
-    val usageLineColor = ChartColors.ConsumptionLine
+    val isScrollable = false
+    val priceLineColor = ChartColors.PriceLine
+
+    // Single-color fallback for PriceLineChart backward compatibility.
+    // Not used when bars have zone breakdown, but must be non-empty.
+    val barColors = remember(bars) {
+        bars.map { PriceColors.Moderate }
+    }
 
     Column(modifier = modifier) {
-        // Legend + zoom toggle row
+        // Legend row — three zone swatches + price line indicator
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp),
+                .padding(horizontal = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             LegendSwatch(
-                color = PriceColors.Moderate,
-                label = "Price (p/kWh)",
+                color = PriceColors.Cheap,
+                label = "Cheap",
                 shape = LegendShape.Square,
             )
-            Spacer(Modifier.width(16.dp))
+            Spacer(Modifier.width(10.dp))
             LegendSwatch(
-                color = usageLineColor,
-                label = "Usage (kWh)",
+                color = PriceColors.Moderate,
+                label = "Moderate",
+                shape = LegendShape.Square,
+            )
+            Spacer(Modifier.width(10.dp))
+            LegendSwatch(
+                color = PriceColors.Expensive,
+                label = "Expensive",
+                shape = LegendShape.Square,
+            )
+            Spacer(Modifier.width(14.dp))
+            LegendSwatch(
+                color = priceLineColor,
+                label = "Price",
                 shape = LegendShape.Circle,
             )
-            Spacer(Modifier.weight(1f))
-            IconButton(
-                onClick = { isZoomed = !isZoomed },
-                colors = IconButtonDefaults.iconButtonColors(
-                    containerColor = if (isZoomed)
-                        MaterialTheme.colorScheme.primaryContainer
-                    else
-                        MaterialTheme.colorScheme.surfaceVariant
-                ),
-            ) {
-                Icon(
-                    if (isZoomed) Icons.Default.ZoomOut else Icons.Default.ZoomIn,
-                    contentDescription = if (isZoomed) "Fit to screen" else "Zoom in",
-                )
-            }
         }
 
         CanvasBarChart(
             bars = bars,
             barColors = barColors,
-            yMin = priceMin,
-            yMax = priceMax,
+            yMin = consumptionYMin,
+            yMax = consumptionYMax,
             isScrollable = isScrollable,
             onBarTapped = { idx ->
                 if (useBinned && displayData != null) {
@@ -168,64 +197,13 @@ fun PriceUsageChart(
                     })
                 }
             },
-            usageValues = usageValues,
-            usageYMin = usageMin,
-            usageYMax = usageMax,
-            usageLineColor = usageLineColor,
+            usageValues = priceLineValues,
+            usageYMin = priceYMin,
+            usageYMax = priceYMax,
+            usageLineColor = priceLineColor,
         )
     }
 }
-
-/**
- * Computes four aligned Y-axis values: (priceMin, priceMax, usageMin, usageMax)
- * such that zero sits at the same vertical fraction on both the price and usage
- * axes. This prevents non-negative usage from *looking* negative when prices
- * dip below zero.
- */
-private fun computeAlignedRanges(
-    priceYs: List<Double>,
-    usageYs: List<Double>,
-): AlignedRanges {
-    if (priceYs.isEmpty() || usageYs.isEmpty()) {
-        return AlignedRanges(0.0, 1.0, 0.0, 1.0)
-    }
-
-    val rawPriceMin = priceYs.min()
-    val rawPriceMax = priceYs.max()
-    val rawUsageMax = usageYs.max()
-
-    // Price axis: ensure zero is always included with a small buffer.
-    val priceRange = (rawPriceMax - rawPriceMin).coerceAtLeast(0.1)
-    val pricePad = priceRange * 0.1
-    val pMin = (rawPriceMin - pricePad).coerceAtMost(0.0)
-    val pMax = (rawPriceMax + pricePad).coerceAtLeast(0.0)
-
-    // Where does zero sit on the price axis? 0 = bottom, 1 = top.
-    val priceZeroFraction = if (pMin < 0 && pMax > 0) {
-        -pMin / (pMax - pMin)
-    } else {
-        // Price is entirely >= 0 — axes already align at the bottom edge.
-        return AlignedRanges(pMin, pMax, 0.0, rawUsageMax * 1.1)
-    }
-
-    // Usage axis: extend below zero so its zero fraction matches the price axis.
-    val usagePad = (rawUsageMax * 0.1).coerceAtLeast(0.05)
-    val uMax = rawUsageMax + usagePad
-    val uMin = if (uMax > 0) {
-        -uMax * priceZeroFraction / (1.0 - priceZeroFraction)
-    } else {
-        0.0
-    }
-
-    return AlignedRanges(pMin, pMax, uMin, uMax)
-}
-
-private data class AlignedRanges(
-    val priceMin: Double,
-    val priceMax: Double,
-    val usageMin: Double,
-    val usageMax: Double,
-)
 
 private enum class LegendShape { Square, Circle }
 
