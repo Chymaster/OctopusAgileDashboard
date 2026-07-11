@@ -13,19 +13,13 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ZoomIn
-import androidx.compose.material.icons.filled.ZoomOut
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -51,6 +45,7 @@ fun PriceUsageChart(
     referencePrice: Double?,
     onPointTapped: (BinnedPoint?) -> Unit,
     modifier: Modifier = Modifier,
+    useCalendarMonthBinning: Boolean = false,
 ) {
     if (points.isEmpty()) return
 
@@ -58,22 +53,29 @@ fun PriceUsageChart(
     val trimmedPoints = remember(points) { points.trimMissingConsumption() }
     if (trimmedPoints.isEmpty()) return
 
-    var isZoomed by remember { mutableStateOf(false) }
-
-    // Auto-bin to keep bar count ≤ 20
-    val binnedPoints = remember(trimmedPoints) { binPoints(trimmedPoints) }
-    val useBinned = !isZoomed && binnedPoints.size < trimmedPoints.size
+    // Auto-bin to keep bar count ≤ 20, or use calendar-month binning for 6M/1Y ranges
+    val binnedPoints = remember(trimmedPoints, useCalendarMonthBinning) {
+        if (useCalendarMonthBinning) binPointsByCalendarMonth(trimmedPoints)
+        else binPoints(trimmedPoints)
+    }
+    val useBinned = binnedPoints.size < trimmedPoints.size
     val displayData = if (useBinned) binnedPoints else null
 
     val londonZone = ZoneId.of("Europe/London")
     val timeFormatter = DateTimeFormatter.ofPattern("HH:mm", Locale.UK)
+    val monthFormatter = DateTimeFormatter.ofPattern("MMM", Locale.UK)
 
     // Build ChartBar list (price values for bars)
-    val bars = remember(displayData, trimmedPoints, useBinned) {
+    val bars = remember(displayData, trimmedPoints, useBinned, useCalendarMonthBinning) {
         if (useBinned && displayData != null) {
             displayData.map { bin ->
+                val label = if (useCalendarMonthBinning) {
+                    bin.intervalStart.atZone(londonZone).format(monthFormatter)
+                } else {
+                    bin.intervalStart.atZone(londonZone).format(timeFormatter)
+                }
                 ChartBar(
-                    label = bin.intervalStart.atZone(londonZone).format(timeFormatter),
+                    label = label,
                     value = bin.avgPrice ?: 0.0,
                     intervalStart = bin.intervalStart,
                     intervalEnd = bin.intervalEnd
@@ -113,7 +115,7 @@ fun PriceUsageChart(
         computeAlignedRanges(priceYs, usageValues)
     }
 
-    val isScrollable = isZoomed
+    val isScrollable = false
     val usageLineColor = ChartColors.ConsumptionLine
 
     Column(modifier = modifier) {
@@ -135,21 +137,6 @@ fun PriceUsageChart(
                 label = "Usage (kWh)",
                 shape = LegendShape.Circle,
             )
-            Spacer(Modifier.weight(1f))
-            IconButton(
-                onClick = { isZoomed = !isZoomed },
-                colors = IconButtonDefaults.iconButtonColors(
-                    containerColor = if (isZoomed)
-                        MaterialTheme.colorScheme.primaryContainer
-                    else
-                        MaterialTheme.colorScheme.surfaceVariant
-                ),
-            ) {
-                Icon(
-                    if (isZoomed) Icons.Default.ZoomOut else Icons.Default.ZoomIn,
-                    contentDescription = if (isZoomed) "Fit to screen" else "Zoom in",
-                )
-            }
         }
 
         CanvasBarChart(
