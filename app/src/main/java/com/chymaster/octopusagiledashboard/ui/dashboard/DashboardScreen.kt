@@ -283,6 +283,9 @@ fun DashboardScreen(
                                         ChartGroup.COST -> PriceLineChart(
                                             points = uiState.displayChartPoints,
                                             chartMode = ChartMode.COST,
+                                            referencePrice = uiState.flexiblePrice,
+                                            cheapThresholdPercent = uiState.cheapThresholdPercent,
+                                            moderateThresholdPercent = uiState.moderateThresholdPercent,
                                             onPointTapped = viewModel::onPointTapped,
                                             modifier = Modifier.padding(horizontal = 8.dp),
                                             useCalendarMonthBinning = useCalendarMonthBinning,
