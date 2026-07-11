@@ -37,6 +37,7 @@ private val londonZone = ZoneId.of("Europe/London")
 private val timeFormatter = DateTimeFormatter.ofPattern("HH:mm", Locale.UK)
 private val dateFormatter = DateTimeFormatter.ofPattern("dd/MM", Locale.UK)
 private val dateTimeFormatter = DateTimeFormatter.ofPattern("dd/MM\nHH:mm", Locale.UK)
+private val monthFormatter = DateTimeFormatter.ofPattern("MMM", Locale.UK)
 
 /**
  * A single bar for the canvas chart.
@@ -351,11 +352,16 @@ fun CanvasBarChart(
                     }
                     for (i in bars.indices step labelInterval) {
                         val x = chartLeft + i * (barWidth + gap) + barWidth / 2
-                        // Format label with date at midnight crossings
-                        val isDailyOrLarger = bars[i].let {
-                            java.time.Duration.between(it.intervalStart, it.intervalEnd).toHours() >= 24
+                        // Format label with date at midnight crossings;
+                        // for monthly bins (≥27 days), show abbreviated month name.
+                        val durationHours = bars[i].let {
+                            java.time.Duration.between(it.intervalStart, it.intervalEnd).toHours()
                         }
-                        val label = if (isDailyOrLarger) {
+                        val isMonthly = durationHours >= 24 * 27
+                        val isDailyOrLarger = durationHours >= 24
+                        val label = if (isMonthly) {
+                            bars[i].intervalStart.atZone(londonZone).format(monthFormatter)
+                        } else if (isDailyOrLarger) {
                             bars[i].intervalStart.atZone(londonZone).format(dateFormatter)
                         } else {
                             val showDate = i > 0 && run {

@@ -2,9 +2,13 @@ package com.chymaster.octopusagiledashboard.ui.chart
 
 import androidx.compose.ui.graphics.Color
 import com.chymaster.octopusagiledashboard.domain.model.HalfHourPoint
+import java.time.Duration
 import java.time.Instant
+import java.time.YearMonth
 import java.time.ZoneId
+import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
+import java.time.temporal.ChronoUnit
 import java.util.Locale
 
 /**
@@ -129,6 +133,53 @@ fun binPoints(points: List<HalfHourPoint>, binDurationSeconds: Long): List<Binne
             totalConsumption = bin.consumption.takeIf { it != 0.0 },
             totalCost = bin.cost.takeIf { it != 0.0 },
             pointCount = bin.count
+        )
+    }
+}
+
+/**
+ * Bins half-hour points by calendar month. Each bin spans from the 1st of the
+ * month at 00:00 to the last day at 23:30 (London time). Price is averaged,
+ * consumption and cost are summed.
+ *
+ * Used for 6M and 1Y date ranges so each bar represents a natural calendar month.
+ */
+fun binPointsByCalendarMonth(points: List<HalfHourPoint>): List<BinnedPoint> {
+    if (points.isEmpty()) return emptyList()
+    val londonZone = ZoneId.of("Europe/London")
+
+    data class MonthAccumulator(
+        val yearMonth: YearMonth,
+        val prices: MutableList<Double> = mutableListOf(),
+        var consumption: Double = 0.0,
+        var cost: Double = 0.0,
+        var count: Int = 0
+    )
+
+    val months = linkedMapOf<YearMonth, MonthAccumulator>()
+
+    for (point in points) {
+        val zoned = point.intervalStart.atZone(londonZone)
+        val yearMonth = YearMonth.from(zoned)
+        val acc = months.getOrPut(yearMonth) { MonthAccumulator(yearMonth) }
+        point.priceIncVat?.let { acc.prices.add(it) }
+        acc.consumption += point.consumptionKwh ?: 0.0
+        acc.cost += point.costIncVat ?: 0.0
+        acc.count++
+    }
+
+    return months.values.map { acc ->
+        val firstDay = acc.yearMonth.atDay(1)
+        val lastDay = acc.yearMonth.atEndOfMonth()
+        val intervalStart = firstDay.atStartOfDay(londonZone).toInstant()
+        val intervalEnd = lastDay.atTime(23, 30).atZone(londonZone).toInstant()
+        BinnedPoint(
+            intervalStart = intervalStart,
+            intervalEnd = intervalEnd,
+            avgPrice = acc.prices.takeIf { it.isNotEmpty() }?.average(),
+            totalConsumption = acc.consumption.takeIf { it != 0.0 },
+            totalCost = acc.cost.takeIf { it != 0.0 },
+            pointCount = acc.count
         )
     }
 }
