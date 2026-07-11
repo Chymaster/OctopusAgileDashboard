@@ -76,6 +76,13 @@ fun DashboardScreen(
         else -> false
     }
 
+    // Use calendar-day binning for 7D so each bar represents a natural
+    // calendar day (00:00–23:30 London time).
+    val useCalendarDayBinning = when (val sel = uiState.selectedRange) {
+        is DateRangeSelection.Preset -> sel.preset == TimeRangePreset.SEVEN_DAYS
+        else -> false
+    }
+
     LaunchedEffect(uiState.error) {
         uiState.error?.let {
             snackbarHostState.showSnackbar(it)
@@ -263,9 +270,12 @@ fun DashboardScreen(
                                         ChartGroup.PRICE_USAGE -> PriceUsageChart(
                                             points = uiState.displayChartPoints,
                                             referencePrice = uiState.flexiblePrice,
+                                            cheapThresholdPercent = uiState.cheapThresholdPercent,
+                                            moderateThresholdPercent = uiState.moderateThresholdPercent,
                                             onPointTapped = viewModel::onPointTapped,
                                             modifier = Modifier.padding(horizontal = 8.dp),
                                             useCalendarMonthBinning = useCalendarMonthBinning,
+                                            useCalendarDayBinning = useCalendarDayBinning,
                                         )
                                         ChartGroup.COST -> PriceLineChart(
                                             points = uiState.displayChartPoints,
@@ -273,6 +283,7 @@ fun DashboardScreen(
                                             onPointTapped = viewModel::onPointTapped,
                                             modifier = Modifier.padding(horizontal = 8.dp),
                                             useCalendarMonthBinning = useCalendarMonthBinning,
+                                            useCalendarDayBinning = useCalendarDayBinning,
                                         )
                                     }
                                     if (uiState.isChartLoading) {

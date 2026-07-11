@@ -36,12 +36,14 @@ fun PriceLineChart(
     onPointTapped: (BinnedPoint?) -> Unit,
     modifier: Modifier = Modifier,
     useCalendarMonthBinning: Boolean = false,
+    useCalendarDayBinning: Boolean = false,
 ) {
     var isZoomed by remember { mutableStateOf(false) }
 
     // Auto-bin to keep bar count ≤ 20, or use calendar-month binning for 6M/1Y ranges
-    val binnedPoints = remember(points, useCalendarMonthBinning) {
-        if (useCalendarMonthBinning) binPointsByCalendarMonth(points)
+    val binnedPoints = remember(points, useCalendarMonthBinning, useCalendarDayBinning) {
+        if (useCalendarDayBinning) binPointsByCalendarDay(points)
+        else if (useCalendarMonthBinning) binPointsByCalendarMonth(points)
         else binPoints(points)
     }
     val useBinned = !isZoomed && binnedPoints.size < points.size
@@ -50,9 +52,10 @@ fun PriceLineChart(
     // Map to ChartBar list
     val londonZone = ZoneId.of("Europe/London")
     val timeFormatter = DateTimeFormatter.ofPattern("HH:mm", Locale.UK)
+    val dayFormatter = DateTimeFormatter.ofPattern("dd/MM", Locale.UK)
     val monthFormatter = DateTimeFormatter.ofPattern("MMM", Locale.UK)
 
-    val bars = remember(displayData, points, chartMode, useBinned, useCalendarMonthBinning) {
+    val bars = remember(displayData, points, chartMode, useBinned, useCalendarMonthBinning, useCalendarDayBinning) {
         if (useBinned && displayData != null) {
             displayData.map { bin ->
                 val value = when (chartMode) {
@@ -60,10 +63,13 @@ fun PriceLineChart(
                     ChartMode.CONSUMPTION -> bin.totalConsumption ?: 0.0
                     ChartMode.COST -> (bin.totalCost ?: 0.0) / 100.0
                 }
-                val label = if (useCalendarMonthBinning) {
-                    bin.intervalStart.atZone(londonZone).format(monthFormatter)
-                } else {
-                    bin.intervalStart.atZone(londonZone).format(timeFormatter)
+                val label = when {
+                    useCalendarMonthBinning ->
+                        bin.intervalStart.atZone(londonZone).format(monthFormatter)
+                    useCalendarDayBinning ->
+                        bin.intervalStart.atZone(londonZone).format(dayFormatter)
+                    else ->
+                        bin.intervalStart.atZone(londonZone).format(timeFormatter)
                 }
                 ChartBar(
                     label = label,
