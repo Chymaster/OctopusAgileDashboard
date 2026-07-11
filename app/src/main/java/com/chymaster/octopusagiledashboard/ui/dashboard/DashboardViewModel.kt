@@ -192,7 +192,10 @@ class DashboardViewModel @Inject constructor(
                 greenUsageCost = 0.0,
                 amberUsageCost = 0.0,
                 redUsageCost = 0.0,
-                displayChartPoints = generatePlaceholderPoints(start, end)
+                displayChartPoints = generatePlaceholderPoints(start, end),
+                selectedBinnedPoint = null,
+                showCostBreakdown = false,
+                showUsageBreakdown = false
             )
         }
         _selectedRange.value = range
@@ -234,15 +237,48 @@ class DashboardViewModel @Inject constructor(
     }
 
     fun onPointTapped(point: BinnedPoint?) {
-        _uiState.update { it.copy(selectedBinnedPoint = point) }
+        _uiState.update {
+            if (point != null) {
+                // Opening a detail sheet — dismiss any other open popups.
+                it.copy(
+                    selectedBinnedPoint = point,
+                    showCostBreakdown = false,
+                    showUsageBreakdown = false
+                )
+            } else {
+                it.copy(selectedBinnedPoint = null)
+            }
+        }
     }
 
     fun onToggleCostBreakdown() {
-        _uiState.update { it.copy(showCostBreakdown = !it.showCostBreakdown) }
+        _uiState.update {
+            if (!it.showCostBreakdown) {
+                // Opening — dismiss any other open popups.
+                it.copy(
+                    showCostBreakdown = true,
+                    selectedBinnedPoint = null,
+                    showUsageBreakdown = false
+                )
+            } else {
+                it.copy(showCostBreakdown = false)
+            }
+        }
     }
 
     fun onToggleUsageBreakdown() {
-        _uiState.update { it.copy(showUsageBreakdown = !it.showUsageBreakdown) }
+        _uiState.update {
+            if (!it.showUsageBreakdown) {
+                // Opening — dismiss any other open popups.
+                it.copy(
+                    showUsageBreakdown = true,
+                    selectedBinnedPoint = null,
+                    showCostBreakdown = false
+                )
+            } else {
+                it.copy(showUsageBreakdown = false)
+            }
+        }
     }
 
     fun clearError() {

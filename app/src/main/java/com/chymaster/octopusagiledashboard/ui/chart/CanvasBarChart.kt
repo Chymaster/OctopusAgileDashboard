@@ -52,6 +52,8 @@ data class ChartBar(
     val greenSegment: Double = 0.0,
     val amberSegment: Double = 0.0,
     val redSegment: Double = 0.0,
+    /** Unit label for tooltips (e.g. "kWh", "£"). */
+    val unitLabel: String = "kWh",
 ) {
     /** True when at least one zone segment carries non-zero consumption. */
     val hasZoneBreakdown: Boolean
@@ -309,7 +311,7 @@ fun CanvasBarChart(
 
                             if (bar.hasZoneBreakdown) {
                                 // Zone-breakdown tooltip: consumption + zone breakdown
-                                val totalText = String.format(Locale.UK, "%.2f kWh", value)
+                                val totalText = String.format(Locale.UK, "%.2f %s", value, bar.unitLabel)
                                 val zoneText = String.format(
                                     Locale.UK, "G:%.2f  A:%.2f  R:%.2f",
                                     bar.greenSegment, bar.amberSegment, bar.redSegment
@@ -356,7 +358,7 @@ fun CanvasBarChart(
                                 drawContext.canvas.nativeCanvas.drawText(timeText, tooltipX, tooltipY + 6.dp.toPx(), timePaint)
                             } else {
                                 // Original tooltip for single-color bars
-                                val tooltipText = String.format(Locale.UK, "%.1f p", value)
+                                val tooltipText = String.format(Locale.UK, "%.1f %s", value, bar.unitLabel)
                                 val timeText = bar.intervalStart.atZone(londonZone).format(timeFormatter)
                                 val tooltipPaint = android.graphics.Paint().apply {
                                     this.color = android.graphics.Color.WHITE

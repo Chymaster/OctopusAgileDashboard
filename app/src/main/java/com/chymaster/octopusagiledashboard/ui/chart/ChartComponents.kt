@@ -27,6 +27,10 @@ data class BinnedPoint(
     val greenConsumption: Double = 0.0,
     val amberConsumption: Double = 0.0,
     val redConsumption: Double = 0.0,
+    /** Cost (pence) within this bin that fell in each price zone. */
+    val greenCost: Double = 0.0,
+    val amberCost: Double = 0.0,
+    val redCost: Double = 0.0,
 )
 
 /**
@@ -173,6 +177,9 @@ fun binPoints(
                 greenConsumption = if (zone == PriceColors.Cheap) kwh else 0.0,
                 amberConsumption = if (zone == PriceColors.Moderate) kwh else 0.0,
                 redConsumption = if (zone == PriceColors.Expensive) kwh else 0.0,
+                greenCost = if (zone == PriceColors.Cheap) (p.costIncVat ?: 0.0) else 0.0,
+                amberCost = if (zone == PriceColors.Moderate) (p.costIncVat ?: 0.0) else 0.0,
+                redCost = if (zone == PriceColors.Expensive) (p.costIncVat ?: 0.0) else 0.0,
             )
         }
     }
@@ -186,6 +193,9 @@ fun binPoints(
         var greenKwh: Double = 0.0,
         var amberKwh: Double = 0.0,
         var redKwh: Double = 0.0,
+        var greenCost: Double = 0.0,
+        var amberCost: Double = 0.0,
+        var redCost: Double = 0.0,
     )
 
     val bins = linkedMapOf<Long, ZoneAccumulator>()
@@ -202,15 +212,26 @@ fun binPoints(
         bin.count++
 
         val price = point.priceIncVat
+        val pointCost = point.costIncVat ?: 0.0
         if (price != null) {
             when (PriceColors.priceColor(price, referencePrice, cheapPercent, moderatePercent)) {
-                PriceColors.Cheap -> bin.greenKwh += kwh
-                PriceColors.Moderate -> bin.amberKwh += kwh
-                PriceColors.Expensive -> bin.redKwh += kwh
+                PriceColors.Cheap -> {
+                    bin.greenKwh += kwh
+                    bin.greenCost += pointCost
+                }
+                PriceColors.Moderate -> {
+                    bin.amberKwh += kwh
+                    bin.amberCost += pointCost
+                }
+                PriceColors.Expensive -> {
+                    bin.redKwh += kwh
+                    bin.redCost += pointCost
+                }
             }
         } else {
             // No price data — assign to amber (the fallback zone)
             bin.amberKwh += kwh
+            bin.amberCost += pointCost
         }
     }
 
@@ -227,6 +248,9 @@ fun binPoints(
             greenConsumption = bin.greenKwh,
             amberConsumption = bin.amberKwh,
             redConsumption = bin.redKwh,
+            greenCost = bin.greenCost,
+            amberCost = bin.amberCost,
+            redCost = bin.redCost,
         )
     }
 }
@@ -319,6 +343,9 @@ fun binPointsByCalendarMonth(
         var greenKwh: Double = 0.0,
         var amberKwh: Double = 0.0,
         var redKwh: Double = 0.0,
+        var greenCost: Double = 0.0,
+        var amberCost: Double = 0.0,
+        var redCost: Double = 0.0,
     )
 
     val months = linkedMapOf<YearMonth, ZoneMonthAccumulator>()
@@ -334,14 +361,25 @@ fun binPointsByCalendarMonth(
         acc.count++
 
         val price = point.priceIncVat
+        val pointCost = point.costIncVat ?: 0.0
         if (price != null) {
             when (PriceColors.priceColor(price, referencePrice, cheapPercent, moderatePercent)) {
-                PriceColors.Cheap -> acc.greenKwh += kwh
-                PriceColors.Moderate -> acc.amberKwh += kwh
-                PriceColors.Expensive -> acc.redKwh += kwh
+                PriceColors.Cheap -> {
+                    acc.greenKwh += kwh
+                    acc.greenCost += pointCost
+                }
+                PriceColors.Moderate -> {
+                    acc.amberKwh += kwh
+                    acc.amberCost += pointCost
+                }
+                PriceColors.Expensive -> {
+                    acc.redKwh += kwh
+                    acc.redCost += pointCost
+                }
             }
         } else {
             acc.amberKwh += kwh
+            acc.amberCost += pointCost
         }
     }
 
@@ -360,6 +398,9 @@ fun binPointsByCalendarMonth(
             greenConsumption = acc.greenKwh,
             amberConsumption = acc.amberKwh,
             redConsumption = acc.redKwh,
+            greenCost = acc.greenCost,
+            amberCost = acc.amberCost,
+            redCost = acc.redCost,
         )
     }
 }
@@ -430,6 +471,9 @@ fun binPointsByCalendarDay(
         var greenKwh: Double = 0.0,
         var amberKwh: Double = 0.0,
         var redKwh: Double = 0.0,
+        var greenCost: Double = 0.0,
+        var amberCost: Double = 0.0,
+        var redCost: Double = 0.0,
     )
 
     val days = linkedMapOf<LocalDate, ZoneDayAccumulator>()
@@ -445,14 +489,25 @@ fun binPointsByCalendarDay(
         acc.count++
 
         val price = point.priceIncVat
+        val pointCost = point.costIncVat ?: 0.0
         if (price != null) {
             when (PriceColors.priceColor(price, referencePrice, cheapPercent, moderatePercent)) {
-                PriceColors.Cheap -> acc.greenKwh += kwh
-                PriceColors.Moderate -> acc.amberKwh += kwh
-                PriceColors.Expensive -> acc.redKwh += kwh
+                PriceColors.Cheap -> {
+                    acc.greenKwh += kwh
+                    acc.greenCost += pointCost
+                }
+                PriceColors.Moderate -> {
+                    acc.amberKwh += kwh
+                    acc.amberCost += pointCost
+                }
+                PriceColors.Expensive -> {
+                    acc.redKwh += kwh
+                    acc.redCost += pointCost
+                }
             }
         } else {
             acc.amberKwh += kwh
+            acc.amberCost += pointCost
         }
     }
 
@@ -469,6 +524,9 @@ fun binPointsByCalendarDay(
             greenConsumption = acc.greenKwh,
             amberConsumption = acc.amberKwh,
             redConsumption = acc.redKwh,
+            greenCost = acc.greenCost,
+            amberCost = acc.amberCost,
+            redCost = acc.redCost,
         )
     }
 }
