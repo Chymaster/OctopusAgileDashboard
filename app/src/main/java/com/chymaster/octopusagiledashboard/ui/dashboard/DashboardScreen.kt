@@ -219,6 +219,9 @@ fun DashboardScreen(
                                     usageCost = uiState.usageCost,
                                     standingChargeCost = uiState.standingChargeCost,
                                     totalCost = uiState.totalCost,
+                                    greenUsageCost = uiState.greenUsageCost,
+                                    amberUsageCost = uiState.amberUsageCost,
+                                    redUsageCost = uiState.redUsageCost,
                                     onDismiss = { viewModel.onToggleCostBreakdown() }
                                 )
                             }
