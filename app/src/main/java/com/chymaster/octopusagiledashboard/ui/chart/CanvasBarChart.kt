@@ -28,6 +28,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.chymaster.octopusagiledashboard.ui.theme.PriceColors
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -37,6 +38,7 @@ private val londonZone = ZoneId.of("Europe/London")
 private val timeFormatter = DateTimeFormatter.ofPattern("HH:mm", Locale.UK)
 private val dateFormatter = DateTimeFormatter.ofPattern("dd/MM", Locale.UK)
 private val dateTimeFormatter = DateTimeFormatter.ofPattern("dd/MM\nHH:mm", Locale.UK)
+private val monthFormatter = DateTimeFormatter.ofPattern("MMM", Locale.UK)
 
 /**
  * A single bar for the canvas chart.
@@ -46,7 +48,17 @@ data class ChartBar(
     val value: Double,
     val intervalStart: Instant,
     val intervalEnd: Instant,
-)
+    /** Per-zone consumption segments for stacked-bar rendering. */
+    val greenSegment: Double = 0.0,
+    val amberSegment: Double = 0.0,
+    val redSegment: Double = 0.0,
+    /** Unit label for tooltips (e.g. "kWh", "£"). */
+    val unitLabel: String = "kWh",
+) {
+    /** True when at least one zone segment carries non-zero consumption. */
+    val hasZoneBreakdown: Boolean
+        get() = greenSegment > 0.0 || amberSegment > 0.0 || redSegment > 0.0
+}
 
 /**
  * Reusable Canvas-based bar chart with thick bars that fill available width.
@@ -159,19 +171,23 @@ fun CanvasBarChart(
                         (chartWidth - gap * (chartBarCount - 1)) / chartBarCount
                     }
 
-                    // Y-axis price labels (left side)
+                    // Detect if bars carry zone-breakdown data (→ kWh) or plain values (→ price/cost).
+                    val isZoneChart = bars.any { it.hasZoneBreakdown }
+
+                    // Y-axis labels (left side)
                     val yLabelPaint = android.graphics.Paint().apply {
                         color = labelColor.hashCode()
                         textSize = 9.sp.toPx()
                         textAlign = android.graphics.Paint.Align.RIGHT
                         isAntiAlias = true
                     }
+                    val yLabelFormat = if (isZoneChart) "%.2f" else "%.1f"
                     val ySteps = 4
                     for (i in 0..ySteps) {
-                        val priceVal = yMin + (yMax - yMin) * i / ySteps
+                        val yVal = yMin + (yMax - yMin) * i / ySteps
                         val y = chartBottom - (chartHeight * i / ySteps)
                         drawContext.canvas.nativeCanvas.drawText(
-                            String.format(Locale.UK, "%.1f", priceVal),
+                            String.format(Locale.UK, yLabelFormat, yVal),
                             chartLeft - 4.dp.toPx(),
                             y + 3.dp.toPx(),
                             yLabelPaint
@@ -184,7 +200,7 @@ fun CanvasBarChart(
                         )
                     }
 
-                    // Right Y-axis labels for usage line
+                    // Right Y-axis labels for overlay line
                     if (hasUsageLine) {
                         val rightLabelPaint = android.graphics.Paint().apply {
                             color = labelColor.hashCode()
@@ -192,11 +208,12 @@ fun CanvasBarChart(
                             textAlign = android.graphics.Paint.Align.LEFT
                             isAntiAlias = true
                         }
+                        val rightLabelFormat = if (isZoneChart) "%.1f" else "%.2f"
                         for (i in 0..ySteps) {
                             val usageVal = usageYMin + (usageYMax - usageYMin) * i / ySteps
                             val y = chartBottom - (chartHeight * i / ySteps)
                             drawContext.canvas.nativeCanvas.drawText(
-                                String.format(Locale.UK, "%.2f", usageVal),
+                                String.format(Locale.UK, rightLabelFormat, usageVal),
                                 chartRight + 4.dp.toPx(),
                                 y + 3.dp.toPx(),
                                 rightLabelPaint
@@ -220,8 +237,8 @@ fun CanvasBarChart(
 
                     // Draw bars
                     for (i in bars.indices) {
-                        val value = bars[i].value
-                        val color = barColors.getOrElse(i) { barColors.last() }
+                        val bar = bars[i]
+                        val value = bar.value
                         val isTapped = i == tappedIndex || i == selectedIndex
                         val fraction = if (yMax != yMin) {
                             ((value - yMin) / (yMax - yMin)).coerceIn(0.0, 1.0)
@@ -239,12 +256,45 @@ fun CanvasBarChart(
                         }
 
                         if (barDrawHeight > 0f) {
-                            drawRoundRect(
-                                color = color,
-                                topLeft = Offset(x, barTop),
-                                size = Size(barWidth, barDrawHeight),
-                                cornerRadius = CornerRadius(2.dp.toPx(), 2.dp.toPx())
-                            )
+                            if (bar.hasZoneBreakdown) {
+                                // Draw stacked green/amber/red segments
+                                val segmentTotal = bar.greenSegment + bar.amberSegment + bar.redSegment
+                                if (segmentTotal > 0.0) {
+                                    val segments = listOf(
+                                        Triple(bar.greenSegment, PriceColors.Cheap, false),
+                                        Triple(bar.amberSegment, PriceColors.Moderate, false),
+                                        Triple(bar.redSegment, PriceColors.Expensive, true),
+                                    )
+                                    var segTop = barTop
+                                    for ((segVal, segColor, isLast) in segments) {
+                                        if (segVal <= 0.0) continue
+                                        val segHeight = ((segVal / segmentTotal) * barDrawHeight.toDouble())
+                                            .toFloat().coerceAtLeast(0.5f)
+                                        val cornerRadius = if (isLast && segTop <= barTop + 1f) {
+                                            // Only one segment or top segment — round top corners
+                                            CornerRadius(2.dp.toPx(), 2.dp.toPx())
+                                        } else {
+                                            CornerRadius(0f, 0f)
+                                        }
+                                        drawRoundRect(
+                                            color = segColor,
+                                            topLeft = Offset(x, segTop),
+                                            size = Size(barWidth, segHeight),
+                                            cornerRadius = cornerRadius
+                                        )
+                                        segTop += segHeight
+                                    }
+                                }
+                            } else {
+                                // Single-color bar (backward-compatible with PriceLineChart)
+                                val color = barColors.getOrElse(i) { barColors.last() }
+                                drawRoundRect(
+                                    color = color,
+                                    topLeft = Offset(x, barTop),
+                                    size = Size(barWidth, barDrawHeight),
+                                    cornerRadius = CornerRadius(2.dp.toPx(), 2.dp.toPx())
+                                )
+                            }
                         }
 
                         // Tapped bar highlight + tooltip
@@ -256,47 +306,98 @@ fun CanvasBarChart(
                                 cornerRadius = CornerRadius(2.dp.toPx(), 2.dp.toPx())
                             )
 
-                            val tooltipText = String.format(Locale.UK, "%.1f p", value)
-                            val timeText = bars[i].intervalStart.atZone(londonZone).format(timeFormatter)
-                            val tooltipPaint = android.graphics.Paint().apply {
-                                this.color = android.graphics.Color.WHITE
-                                textSize = 10.sp.toPx()
-                                textAlign = android.graphics.Paint.Align.CENTER
-                                isAntiAlias = true
-                                isFakeBoldText = true
-                            }
-                            val bgPaint = android.graphics.Paint().apply {
-                                this.color = android.graphics.Color.argb(200, 40, 40, 40)
-                                isAntiAlias = true
-                            }
-
                             val tooltipX = x + barWidth / 2
                             val tooltipY = if (value >= 0) barTop - 8.dp.toPx() else barTop + barDrawHeight + 18.dp.toPx()
-                            val textWidth = tooltipPaint.measureText("$tooltipText $timeText")
-                            val bgRect = android.graphics.RectF(
-                                tooltipX - textWidth / 2 - 6.dp.toPx(),
-                                tooltipY - 14.dp.toPx(),
-                                tooltipX + textWidth / 2 + 6.dp.toPx(),
-                                tooltipY + 4.dp.toPx()
-                            )
-                            drawContext.canvas.nativeCanvas.drawRoundRect(bgRect, 4.dp.toPx(), 4.dp.toPx(), bgPaint)
-                            drawContext.canvas.nativeCanvas.drawText(
-                                tooltipText,
-                                tooltipX,
-                                tooltipY - 2.dp.toPx(),
-                                tooltipPaint
-                            )
-                            val timePaint = android.graphics.Paint(tooltipPaint).apply {
-                                this.color = android.graphics.Color.LTGRAY
-                                textSize = 8.sp.toPx()
-                                isFakeBoldText = false
+
+                            if (bar.hasZoneBreakdown) {
+                                // Zone-breakdown tooltip: consumption + zone breakdown
+                                val totalText = String.format(Locale.UK, "%.2f %s", value, bar.unitLabel)
+                                val zoneText = String.format(
+                                    Locale.UK, "G:%.2f  A:%.2f  R:%.2f",
+                                    bar.greenSegment, bar.amberSegment, bar.redSegment
+                                )
+                                val timeText = bar.intervalStart.atZone(londonZone).format(timeFormatter)
+
+                                val tooltipPaint = android.graphics.Paint().apply {
+                                    this.color = android.graphics.Color.WHITE
+                                    textSize = 10.sp.toPx()
+                                    textAlign = android.graphics.Paint.Align.CENTER
+                                    isAntiAlias = true
+                                    isFakeBoldText = true
+                                }
+                                val zonePaint = android.graphics.Paint().apply {
+                                    this.color = android.graphics.Color.argb(255, 200, 200, 200)
+                                    textSize = 8.sp.toPx()
+                                    textAlign = android.graphics.Paint.Align.CENTER
+                                    isAntiAlias = true
+                                }
+                                val timePaint = android.graphics.Paint(tooltipPaint).apply {
+                                    this.color = android.graphics.Color.LTGRAY
+                                    textSize = 8.sp.toPx()
+                                    isFakeBoldText = false
+                                }
+                                val bgPaint = android.graphics.Paint().apply {
+                                    this.color = android.graphics.Color.argb(200, 40, 40, 40)
+                                    isAntiAlias = true
+                                }
+
+                                val maxLineWidth = maxOf(
+                                    tooltipPaint.measureText(totalText),
+                                    zonePaint.measureText(zoneText),
+                                    timePaint.measureText(timeText)
+                                )
+                                val bgRect = android.graphics.RectF(
+                                    tooltipX - maxLineWidth / 2 - 6.dp.toPx(),
+                                    tooltipY - 28.dp.toPx(),
+                                    tooltipX + maxLineWidth / 2 + 6.dp.toPx(),
+                                    tooltipY + 12.dp.toPx()
+                                )
+                                drawContext.canvas.nativeCanvas.drawRoundRect(bgRect, 4.dp.toPx(), 4.dp.toPx(), bgPaint)
+                                drawContext.canvas.nativeCanvas.drawText(totalText, tooltipX, tooltipY - 16.dp.toPx(), tooltipPaint)
+                                drawContext.canvas.nativeCanvas.drawText(zoneText, tooltipX, tooltipY - 6.dp.toPx(), zonePaint)
+                                drawContext.canvas.nativeCanvas.drawText(timeText, tooltipX, tooltipY + 6.dp.toPx(), timePaint)
+                            } else {
+                                // Original tooltip for single-color bars
+                                val tooltipText = String.format(Locale.UK, "%.1f %s", value, bar.unitLabel)
+                                val timeText = bar.intervalStart.atZone(londonZone).format(timeFormatter)
+                                val tooltipPaint = android.graphics.Paint().apply {
+                                    this.color = android.graphics.Color.WHITE
+                                    textSize = 10.sp.toPx()
+                                    textAlign = android.graphics.Paint.Align.CENTER
+                                    isAntiAlias = true
+                                    isFakeBoldText = true
+                                }
+                                val bgPaint = android.graphics.Paint().apply {
+                                    this.color = android.graphics.Color.argb(200, 40, 40, 40)
+                                    isAntiAlias = true
+                                }
+
+                                val textWidth = tooltipPaint.measureText("$tooltipText $timeText")
+                                val bgRect = android.graphics.RectF(
+                                    tooltipX - textWidth / 2 - 6.dp.toPx(),
+                                    tooltipY - 14.dp.toPx(),
+                                    tooltipX + textWidth / 2 + 6.dp.toPx(),
+                                    tooltipY + 4.dp.toPx()
+                                )
+                                drawContext.canvas.nativeCanvas.drawRoundRect(bgRect, 4.dp.toPx(), 4.dp.toPx(), bgPaint)
+                                drawContext.canvas.nativeCanvas.drawText(
+                                    tooltipText,
+                                    tooltipX,
+                                    tooltipY - 2.dp.toPx(),
+                                    tooltipPaint
+                                )
+                                val timePaint = android.graphics.Paint(tooltipPaint).apply {
+                                    this.color = android.graphics.Color.LTGRAY
+                                    textSize = 8.sp.toPx()
+                                    isFakeBoldText = false
+                                }
+                                drawContext.canvas.nativeCanvas.drawText(
+                                    timeText,
+                                    tooltipX,
+                                    tooltipY + 8.dp.toPx(),
+                                    timePaint
+                                )
                             }
-                            drawContext.canvas.nativeCanvas.drawText(
-                                timeText,
-                                tooltipX,
-                                tooltipY + 8.dp.toPx(),
-                                timePaint
-                            )
                         }
                     }
 
@@ -351,11 +452,16 @@ fun CanvasBarChart(
                     }
                     for (i in bars.indices step labelInterval) {
                         val x = chartLeft + i * (barWidth + gap) + barWidth / 2
-                        // Format label with date at midnight crossings
-                        val isDailyOrLarger = bars[i].let {
-                            java.time.Duration.between(it.intervalStart, it.intervalEnd).toHours() >= 24
+                        // Format label with date at midnight crossings;
+                        // for monthly bins (≥27 days), show abbreviated month name.
+                        val durationHours = bars[i].let {
+                            java.time.Duration.between(it.intervalStart, it.intervalEnd).toHours()
                         }
-                        val label = if (isDailyOrLarger) {
+                        val isMonthly = durationHours >= 24 * 27
+                        val isDailyOrLarger = durationHours >= 24
+                        val label = if (isMonthly) {
+                            bars[i].intervalStart.atZone(londonZone).format(monthFormatter)
+                        } else if (isDailyOrLarger) {
                             bars[i].intervalStart.atZone(londonZone).format(dateFormatter)
                         } else {
                             val showDate = i > 0 && run {

@@ -2,9 +2,15 @@ package com.chymaster.octopusagiledashboard.ui.chart
 
 import androidx.compose.ui.graphics.Color
 import com.chymaster.octopusagiledashboard.domain.model.HalfHourPoint
+import com.chymaster.octopusagiledashboard.ui.theme.PriceColors
+import java.time.Duration
 import java.time.Instant
+import java.time.LocalDate
+import java.time.YearMonth
 import java.time.ZoneId
+import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
+import java.time.temporal.ChronoUnit
 import java.util.Locale
 
 /**
@@ -16,7 +22,15 @@ data class BinnedPoint(
     val avgPrice: Double?,
     val totalConsumption: Double?,
     val totalCost: Double?,
-    val pointCount: Int = 1
+    val pointCount: Int = 1,
+    /** Consumption (kWh) within this bin that fell in each price zone. */
+    val greenConsumption: Double = 0.0,
+    val amberConsumption: Double = 0.0,
+    val redConsumption: Double = 0.0,
+    /** Cost (pence) within this bin that fell in each price zone. */
+    val greenCost: Double = 0.0,
+    val amberCost: Double = 0.0,
+    val redCost: Double = 0.0,
 )
 
 /**
@@ -129,6 +143,390 @@ fun binPoints(points: List<HalfHourPoint>, binDurationSeconds: Long): List<Binne
             totalConsumption = bin.consumption.takeIf { it != 0.0 },
             totalCost = bin.cost.takeIf { it != 0.0 },
             pointCount = bin.count
+        )
+    }
+}
+
+/**
+ * Zone-aware version of [binPoints] that also classifies each half-hour point
+ * into a price zone (green/amber/red) and accumulates per-zone consumption.
+ * The [referencePrice] and [cheapPercent]/[moderatePercent] thresholds define
+ * the zone boundaries using [PriceColors.priceColor].
+ */
+fun binPoints(
+    points: List<HalfHourPoint>,
+    binDurationSeconds: Long,
+    referencePrice: Double?,
+    cheapPercent: Int = PriceColors.DEFAULT_CHEAP_PERCENT,
+    moderatePercent: Int = PriceColors.DEFAULT_MODERATE_PERCENT
+): List<BinnedPoint> {
+    if (points.isEmpty()) return emptyList()
+    if (binDurationSeconds <= 1800L) {
+        return points.map { p ->
+            val kwh = p.consumptionKwh ?: 0.0
+            val zone = PriceColors.priceColor(
+                p.priceIncVat ?: 0.0, referencePrice, cheapPercent, moderatePercent
+            )
+            BinnedPoint(
+                intervalStart = p.intervalStart,
+                intervalEnd = p.intervalEnd,
+                avgPrice = p.priceIncVat,
+                totalConsumption = p.consumptionKwh,
+                totalCost = p.costIncVat,
+                pointCount = 1,
+                greenConsumption = if (zone == PriceColors.Cheap) kwh else 0.0,
+                amberConsumption = if (zone == PriceColors.Moderate) kwh else 0.0,
+                redConsumption = if (zone == PriceColors.Expensive) kwh else 0.0,
+                greenCost = if (zone == PriceColors.Cheap) (p.costIncVat ?: 0.0) else 0.0,
+                amberCost = if (zone == PriceColors.Moderate) (p.costIncVat ?: 0.0) else 0.0,
+                redCost = if (zone == PriceColors.Expensive) (p.costIncVat ?: 0.0) else 0.0,
+            )
+        }
+    }
+
+    data class ZoneAccumulator(
+        val binStart: Long,
+        val prices: MutableList<Double> = mutableListOf(),
+        var consumption: Double = 0.0,
+        var cost: Double = 0.0,
+        var count: Int = 0,
+        var greenKwh: Double = 0.0,
+        var amberKwh: Double = 0.0,
+        var redKwh: Double = 0.0,
+        var greenCost: Double = 0.0,
+        var amberCost: Double = 0.0,
+        var redCost: Double = 0.0,
+    )
+
+    val bins = linkedMapOf<Long, ZoneAccumulator>()
+
+    for (point in points) {
+        val epochSecond = point.intervalStart.epochSecond
+        val binKey = (epochSecond / binDurationSeconds) * binDurationSeconds
+        val bin = bins.getOrPut(binKey) { ZoneAccumulator(binKey) }
+
+        point.priceIncVat?.let { bin.prices.add(it) }
+        val kwh = point.consumptionKwh ?: 0.0
+        bin.consumption += kwh
+        bin.cost += point.costIncVat ?: 0.0
+        bin.count++
+
+        val price = point.priceIncVat
+        val pointCost = point.costIncVat ?: 0.0
+        if (price != null) {
+            when (PriceColors.priceColor(price, referencePrice, cheapPercent, moderatePercent)) {
+                PriceColors.Cheap -> {
+                    bin.greenKwh += kwh
+                    bin.greenCost += pointCost
+                }
+                PriceColors.Moderate -> {
+                    bin.amberKwh += kwh
+                    bin.amberCost += pointCost
+                }
+                PriceColors.Expensive -> {
+                    bin.redKwh += kwh
+                    bin.redCost += pointCost
+                }
+            }
+        } else {
+            // No price data — assign to amber (the fallback zone)
+            bin.amberKwh += kwh
+            bin.amberCost += pointCost
+        }
+    }
+
+    return bins.values.map { bin ->
+        val start = Instant.ofEpochSecond(bin.binStart)
+        val end = Instant.ofEpochSecond(bin.binStart + binDurationSeconds)
+        BinnedPoint(
+            intervalStart = start,
+            intervalEnd = end,
+            avgPrice = bin.prices.takeIf { it.isNotEmpty() }?.average(),
+            totalConsumption = bin.consumption.takeIf { it != 0.0 },
+            totalCost = bin.cost.takeIf { it != 0.0 },
+            pointCount = bin.count,
+            greenConsumption = bin.greenKwh,
+            amberConsumption = bin.amberKwh,
+            redConsumption = bin.redKwh,
+            greenCost = bin.greenCost,
+            amberCost = bin.amberCost,
+            redCost = bin.redCost,
+        )
+    }
+}
+
+/**
+ * Zone-aware auto-binning overload. Picks the optimal bin duration via
+ * [optimalBinSeconds] so bar count stays ≤ 20, then delegates to the
+ * zone-aware explicit-duration overload.
+ */
+fun binPoints(
+    points: List<HalfHourPoint>,
+    referencePrice: Double?,
+    cheapPercent: Int = PriceColors.DEFAULT_CHEAP_PERCENT,
+    moderatePercent: Int = PriceColors.DEFAULT_MODERATE_PERCENT
+): List<BinnedPoint> {
+    if (points.isEmpty()) return emptyList()
+    if (points.size <= 20) {
+        return binPoints(points, 1800L, referencePrice, cheapPercent, moderatePercent)
+    }
+    val binSeconds = optimalBinSeconds(points.size)
+    return binPoints(points, binSeconds, referencePrice, cheapPercent, moderatePercent)
+}
+
+/**
+ * Bins half-hour points by calendar month. Each bin spans from the 1st of the
+ * month at 00:00 to the last day at 23:30 (London time). Price is averaged,
+ * consumption and cost are summed.
+ *
+ * Used for 6M and 1Y date ranges so each bar represents a natural calendar month.
+ */
+fun binPointsByCalendarMonth(points: List<HalfHourPoint>): List<BinnedPoint> {
+    if (points.isEmpty()) return emptyList()
+    val londonZone = ZoneId.of("Europe/London")
+
+    data class MonthAccumulator(
+        val yearMonth: YearMonth,
+        val prices: MutableList<Double> = mutableListOf(),
+        var consumption: Double = 0.0,
+        var cost: Double = 0.0,
+        var count: Int = 0
+    )
+
+    val months = linkedMapOf<YearMonth, MonthAccumulator>()
+
+    for (point in points) {
+        val zoned = point.intervalStart.atZone(londonZone)
+        val yearMonth = YearMonth.from(zoned)
+        val acc = months.getOrPut(yearMonth) { MonthAccumulator(yearMonth) }
+        point.priceIncVat?.let { acc.prices.add(it) }
+        acc.consumption += point.consumptionKwh ?: 0.0
+        acc.cost += point.costIncVat ?: 0.0
+        acc.count++
+    }
+
+    return months.values.map { acc ->
+        val firstDay = acc.yearMonth.atDay(1)
+        val lastDay = acc.yearMonth.atEndOfMonth()
+        val intervalStart = firstDay.atStartOfDay(londonZone).toInstant()
+        val intervalEnd = lastDay.atTime(23, 30).atZone(londonZone).toInstant()
+        BinnedPoint(
+            intervalStart = intervalStart,
+            intervalEnd = intervalEnd,
+            avgPrice = acc.prices.takeIf { it.isNotEmpty() }?.average(),
+            totalConsumption = acc.consumption.takeIf { it != 0.0 },
+            totalCost = acc.cost.takeIf { it != 0.0 },
+            pointCount = acc.count
+        )
+    }
+}
+
+/**
+ * Zone-aware version of [binPointsByCalendarMonth] that classifies each
+ * half-hour point into a price zone and accumulates per-zone consumption.
+ */
+fun binPointsByCalendarMonth(
+    points: List<HalfHourPoint>,
+    referencePrice: Double?,
+    cheapPercent: Int = PriceColors.DEFAULT_CHEAP_PERCENT,
+    moderatePercent: Int = PriceColors.DEFAULT_MODERATE_PERCENT
+): List<BinnedPoint> {
+    if (points.isEmpty()) return emptyList()
+    val londonZone = ZoneId.of("Europe/London")
+
+    data class ZoneMonthAccumulator(
+        val yearMonth: YearMonth,
+        val prices: MutableList<Double> = mutableListOf(),
+        var consumption: Double = 0.0,
+        var cost: Double = 0.0,
+        var count: Int = 0,
+        var greenKwh: Double = 0.0,
+        var amberKwh: Double = 0.0,
+        var redKwh: Double = 0.0,
+        var greenCost: Double = 0.0,
+        var amberCost: Double = 0.0,
+        var redCost: Double = 0.0,
+    )
+
+    val months = linkedMapOf<YearMonth, ZoneMonthAccumulator>()
+
+    for (point in points) {
+        val zoned = point.intervalStart.atZone(londonZone)
+        val yearMonth = YearMonth.from(zoned)
+        val acc = months.getOrPut(yearMonth) { ZoneMonthAccumulator(yearMonth) }
+        point.priceIncVat?.let { acc.prices.add(it) }
+        val kwh = point.consumptionKwh ?: 0.0
+        acc.consumption += kwh
+        acc.cost += point.costIncVat ?: 0.0
+        acc.count++
+
+        val price = point.priceIncVat
+        val pointCost = point.costIncVat ?: 0.0
+        if (price != null) {
+            when (PriceColors.priceColor(price, referencePrice, cheapPercent, moderatePercent)) {
+                PriceColors.Cheap -> {
+                    acc.greenKwh += kwh
+                    acc.greenCost += pointCost
+                }
+                PriceColors.Moderate -> {
+                    acc.amberKwh += kwh
+                    acc.amberCost += pointCost
+                }
+                PriceColors.Expensive -> {
+                    acc.redKwh += kwh
+                    acc.redCost += pointCost
+                }
+            }
+        } else {
+            acc.amberKwh += kwh
+            acc.amberCost += pointCost
+        }
+    }
+
+    return months.values.map { acc ->
+        val firstDay = acc.yearMonth.atDay(1)
+        val lastDay = acc.yearMonth.atEndOfMonth()
+        val intervalStart = firstDay.atStartOfDay(londonZone).toInstant()
+        val intervalEnd = lastDay.atTime(23, 30).atZone(londonZone).toInstant()
+        BinnedPoint(
+            intervalStart = intervalStart,
+            intervalEnd = intervalEnd,
+            avgPrice = acc.prices.takeIf { it.isNotEmpty() }?.average(),
+            totalConsumption = acc.consumption.takeIf { it != 0.0 },
+            totalCost = acc.cost.takeIf { it != 0.0 },
+            pointCount = acc.count,
+            greenConsumption = acc.greenKwh,
+            amberConsumption = acc.amberKwh,
+            redConsumption = acc.redKwh,
+            greenCost = acc.greenCost,
+            amberCost = acc.amberCost,
+            redCost = acc.redCost,
+        )
+    }
+}
+
+/**
+ * Bins half-hour points by calendar day. Each bin spans from 00:00 to 23:30
+ * (London time). Price is averaged, consumption and cost are summed.
+ *
+ * Used for the 7D date range so each bar represents a natural calendar day.
+ */
+fun binPointsByCalendarDay(points: List<HalfHourPoint>): List<BinnedPoint> {
+    if (points.isEmpty()) return emptyList()
+    val londonZone = ZoneId.of("Europe/London")
+
+    data class DayAccumulator(
+        val date: LocalDate,
+        val prices: MutableList<Double> = mutableListOf(),
+        var consumption: Double = 0.0,
+        var cost: Double = 0.0,
+        var count: Int = 0
+    )
+
+    val days = linkedMapOf<LocalDate, DayAccumulator>()
+
+    for (point in points) {
+        val zoned = point.intervalStart.atZone(londonZone)
+        val date = zoned.toLocalDate()
+        val acc = days.getOrPut(date) { DayAccumulator(date) }
+        point.priceIncVat?.let { acc.prices.add(it) }
+        acc.consumption += point.consumptionKwh ?: 0.0
+        acc.cost += point.costIncVat ?: 0.0
+        acc.count++
+    }
+
+    return days.values.map { acc ->
+        val intervalStart = acc.date.atStartOfDay(londonZone).toInstant()
+        val intervalEnd = acc.date.atTime(23, 30).atZone(londonZone).toInstant()
+        BinnedPoint(
+            intervalStart = intervalStart,
+            intervalEnd = intervalEnd,
+            avgPrice = acc.prices.takeIf { it.isNotEmpty() }?.average(),
+            totalConsumption = acc.consumption.takeIf { it != 0.0 },
+            totalCost = acc.cost.takeIf { it != 0.0 },
+            pointCount = acc.count
+        )
+    }
+}
+
+/**
+ * Zone-aware version of [binPointsByCalendarDay] that classifies each
+ * half-hour point into a price zone and accumulates per-zone consumption.
+ */
+fun binPointsByCalendarDay(
+    points: List<HalfHourPoint>,
+    referencePrice: Double?,
+    cheapPercent: Int = PriceColors.DEFAULT_CHEAP_PERCENT,
+    moderatePercent: Int = PriceColors.DEFAULT_MODERATE_PERCENT
+): List<BinnedPoint> {
+    if (points.isEmpty()) return emptyList()
+    val londonZone = ZoneId.of("Europe/London")
+
+    data class ZoneDayAccumulator(
+        val date: LocalDate,
+        val prices: MutableList<Double> = mutableListOf(),
+        var consumption: Double = 0.0,
+        var cost: Double = 0.0,
+        var count: Int = 0,
+        var greenKwh: Double = 0.0,
+        var amberKwh: Double = 0.0,
+        var redKwh: Double = 0.0,
+        var greenCost: Double = 0.0,
+        var amberCost: Double = 0.0,
+        var redCost: Double = 0.0,
+    )
+
+    val days = linkedMapOf<LocalDate, ZoneDayAccumulator>()
+
+    for (point in points) {
+        val zoned = point.intervalStart.atZone(londonZone)
+        val date = zoned.toLocalDate()
+        val acc = days.getOrPut(date) { ZoneDayAccumulator(date) }
+        point.priceIncVat?.let { acc.prices.add(it) }
+        val kwh = point.consumptionKwh ?: 0.0
+        acc.consumption += kwh
+        acc.cost += point.costIncVat ?: 0.0
+        acc.count++
+
+        val price = point.priceIncVat
+        val pointCost = point.costIncVat ?: 0.0
+        if (price != null) {
+            when (PriceColors.priceColor(price, referencePrice, cheapPercent, moderatePercent)) {
+                PriceColors.Cheap -> {
+                    acc.greenKwh += kwh
+                    acc.greenCost += pointCost
+                }
+                PriceColors.Moderate -> {
+                    acc.amberKwh += kwh
+                    acc.amberCost += pointCost
+                }
+                PriceColors.Expensive -> {
+                    acc.redKwh += kwh
+                    acc.redCost += pointCost
+                }
+            }
+        } else {
+            acc.amberKwh += kwh
+            acc.amberCost += pointCost
+        }
+    }
+
+    return days.values.map { acc ->
+        val intervalStart = acc.date.atStartOfDay(londonZone).toInstant()
+        val intervalEnd = acc.date.atTime(23, 30).atZone(londonZone).toInstant()
+        BinnedPoint(
+            intervalStart = intervalStart,
+            intervalEnd = intervalEnd,
+            avgPrice = acc.prices.takeIf { it.isNotEmpty() }?.average(),
+            totalConsumption = acc.consumption.takeIf { it != 0.0 },
+            totalCost = acc.cost.takeIf { it != 0.0 },
+            pointCount = acc.count,
+            greenConsumption = acc.greenKwh,
+            amberConsumption = acc.amberKwh,
+            redConsumption = acc.redKwh,
+            greenCost = acc.greenCost,
+            amberCost = acc.amberCost,
+            redCost = acc.redCost,
         )
     }
 }
