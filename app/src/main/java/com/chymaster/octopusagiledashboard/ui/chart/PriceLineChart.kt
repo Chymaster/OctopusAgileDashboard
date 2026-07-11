@@ -21,6 +21,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.chymaster.octopusagiledashboard.domain.model.HalfHourPoint
+import com.chymaster.octopusagiledashboard.ui.theme.PriceColors
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -34,20 +35,46 @@ fun PriceLineChart(
     points: List<HalfHourPoint>,
     chartMode: ChartMode,
     onPointTapped: (BinnedPoint?) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    useCalendarMonthBinning: Boolean = false,
+    useCalendarDayBinning: Boolean = false,
+    referencePrice: Double? = null,
+    cheapThresholdPercent: Int = PriceColors.DEFAULT_CHEAP_PERCENT,
+    moderateThresholdPercent: Int = PriceColors.DEFAULT_MODERATE_PERCENT,
 ) {
     var isZoomed by remember { mutableStateOf(false) }
 
-    // Auto-bin to keep bar count ≤ 20
-    val binnedPoints = remember(points) { binPoints(points) }
+    // Enable zone breakdown only for COST mode when a reference price is available.
+    val enableZoneBreakdown = chartMode == ChartMode.COST && referencePrice != null
+
+    // Auto-bin to keep bar count ≤ 20, or use calendar-month binning for 6M/1Y ranges.
+    // Use zone-aware variants when zone breakdown is enabled.
+    val binnedPoints = remember(
+        points, useCalendarMonthBinning, useCalendarDayBinning,
+        referencePrice, cheapThresholdPercent, moderateThresholdPercent
+    ) {
+        when {
+            enableZoneBreakdown && useCalendarDayBinning ->
+                binPointsByCalendarDay(points, referencePrice!!, cheapThresholdPercent, moderateThresholdPercent)
+            enableZoneBreakdown && useCalendarMonthBinning ->
+                binPointsByCalendarMonth(points, referencePrice!!, cheapThresholdPercent, moderateThresholdPercent)
+            enableZoneBreakdown ->
+                binPoints(points, referencePrice!!, cheapThresholdPercent, moderateThresholdPercent)
+            useCalendarDayBinning -> binPointsByCalendarDay(points)
+            useCalendarMonthBinning -> binPointsByCalendarMonth(points)
+            else -> binPoints(points)
+        }
+    }
     val useBinned = !isZoomed && binnedPoints.size < points.size
     val displayData = if (useBinned) binnedPoints else null
 
     // Map to ChartBar list
     val londonZone = ZoneId.of("Europe/London")
     val timeFormatter = DateTimeFormatter.ofPattern("HH:mm", Locale.UK)
+    val dayFormatter = DateTimeFormatter.ofPattern("dd/MM", Locale.UK)
+    val monthFormatter = DateTimeFormatter.ofPattern("MMM", Locale.UK)
 
-    val bars = remember(displayData, points, chartMode, useBinned) {
+    val bars = remember(displayData, points, chartMode, useBinned, useCalendarMonthBinning, useCalendarDayBinning) {
         if (useBinned && displayData != null) {
             displayData.map { bin ->
                 val value = when (chartMode) {
@@ -55,11 +82,27 @@ fun PriceLineChart(
                     ChartMode.CONSUMPTION -> bin.totalConsumption ?: 0.0
                     ChartMode.COST -> (bin.totalCost ?: 0.0) / 100.0
                 }
+                val label = when {
+                    useCalendarMonthBinning ->
+                        bin.intervalStart.atZone(londonZone).format(monthFormatter)
+                    useCalendarDayBinning ->
+                        bin.intervalStart.atZone(londonZone).format(dayFormatter)
+                    else ->
+                        bin.intervalStart.atZone(londonZone).format(timeFormatter)
+                }
                 ChartBar(
-                    label = bin.intervalStart.atZone(londonZone).format(timeFormatter),
+                    label = label,
                     value = value,
                     intervalStart = bin.intervalStart,
-                    intervalEnd = bin.intervalEnd
+                    intervalEnd = bin.intervalEnd,
+                    greenSegment = if (enableZoneBreakdown) bin.greenCost / 100.0 else 0.0,
+                    amberSegment = if (enableZoneBreakdown) bin.amberCost / 100.0 else 0.0,
+                    redSegment = if (enableZoneBreakdown) bin.redCost / 100.0 else 0.0,
+                    unitLabel = when (chartMode) {
+                        ChartMode.COST -> "£"
+                        ChartMode.PRICE -> "p"
+                        ChartMode.CONSUMPTION -> "kWh"
+                    },
                 )
             }
         } else {
@@ -69,11 +112,40 @@ fun PriceLineChart(
                     ChartMode.CONSUMPTION -> p.consumptionKwh ?: 0.0
                     ChartMode.COST -> (p.costIncVat ?: 0.0) / 100.0
                 }
+                // Compute per-zone cost segments for COST mode (pence → £)
+                val gCost: Double
+                val aCost: Double
+                val rCost: Double
+                if (enableZoneBreakdown) {
+                    val costPounds = (p.costIncVat ?: 0.0) / 100.0
+                    val price = p.priceIncVat
+                    if (price != null) {
+                        when (PriceColors.priceColor(price, referencePrice!!, cheapThresholdPercent, moderateThresholdPercent)) {
+                            PriceColors.Cheap -> { gCost = costPounds; aCost = 0.0; rCost = 0.0 }
+                            PriceColors.Moderate -> { gCost = 0.0; aCost = costPounds; rCost = 0.0 }
+                            PriceColors.Expensive -> { gCost = 0.0; aCost = 0.0; rCost = costPounds }
+                            else -> { gCost = 0.0; aCost = costPounds; rCost = 0.0 }
+                        }
+                    } else {
+                        // No price data — assign cost to amber (the fallback zone)
+                        gCost = 0.0; aCost = costPounds; rCost = 0.0
+                    }
+                } else {
+                    gCost = 0.0; aCost = 0.0; rCost = 0.0
+                }
                 ChartBar(
                     label = p.intervalStart.atZone(londonZone).format(timeFormatter),
                     value = value,
                     intervalStart = p.intervalStart,
-                    intervalEnd = p.intervalEnd
+                    intervalEnd = p.intervalEnd,
+                    greenSegment = gCost,
+                    amberSegment = aCost,
+                    redSegment = rCost,
+                    unitLabel = when (chartMode) {
+                        ChartMode.COST -> "£"
+                        ChartMode.PRICE -> "p"
+                        ChartMode.CONSUMPTION -> "kWh"
+                    },
                 )
             }
         }

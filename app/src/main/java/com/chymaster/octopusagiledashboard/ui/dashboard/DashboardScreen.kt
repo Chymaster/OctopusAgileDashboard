@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.chymaster.octopusagiledashboard.domain.model.CustomDateRange
 import com.chymaster.octopusagiledashboard.domain.model.DateRangeSelection
+import com.chymaster.octopusagiledashboard.domain.model.TimeRangePreset
 import com.chymaster.octopusagiledashboard.ui.chart.ChartMode
 import com.chymaster.octopusagiledashboard.ui.chart.PriceLineChart
 import com.chymaster.octopusagiledashboard.ui.chart.PriceUsageChart
@@ -66,6 +67,21 @@ fun DashboardScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     var showDatePicker by remember { mutableStateOf(false) }
     var chartGroup by remember { mutableStateOf(ChartGroup.PRICE_USAGE) }
+
+    // Use calendar-month binning for 6M and 1Y presets so each bar
+    // represents a natural calendar month.
+    val useCalendarMonthBinning = when (val sel = uiState.selectedRange) {
+        is DateRangeSelection.Preset -> sel.preset == TimeRangePreset.SIX_MONTHS ||
+                sel.preset == TimeRangePreset.ONE_YEAR
+        else -> false
+    }
+
+    // Use calendar-day binning for 7D so each bar represents a natural
+    // calendar day (00:00–23:30 London time).
+    val useCalendarDayBinning = when (val sel = uiState.selectedRange) {
+        is DateRangeSelection.Preset -> sel.preset == TimeRangePreset.SEVEN_DAYS
+        else -> false
+    }
 
     LaunchedEffect(uiState.error) {
         uiState.error?.let {
@@ -203,6 +219,9 @@ fun DashboardScreen(
                                     usageCost = uiState.usageCost,
                                     standingChargeCost = uiState.standingChargeCost,
                                     totalCost = uiState.totalCost,
+                                    greenUsageCost = uiState.greenUsageCost,
+                                    amberUsageCost = uiState.amberUsageCost,
+                                    redUsageCost = uiState.redUsageCost,
                                     onDismiss = { viewModel.onToggleCostBreakdown() }
                                 )
                             }
@@ -254,14 +273,23 @@ fun DashboardScreen(
                                         ChartGroup.PRICE_USAGE -> PriceUsageChart(
                                             points = uiState.displayChartPoints,
                                             referencePrice = uiState.flexiblePrice,
+                                            cheapThresholdPercent = uiState.cheapThresholdPercent,
+                                            moderateThresholdPercent = uiState.moderateThresholdPercent,
                                             onPointTapped = viewModel::onPointTapped,
-                                            modifier = Modifier.padding(horizontal = 8.dp)
+                                            modifier = Modifier.padding(horizontal = 8.dp),
+                                            useCalendarMonthBinning = useCalendarMonthBinning,
+                                            useCalendarDayBinning = useCalendarDayBinning,
                                         )
                                         ChartGroup.COST -> PriceLineChart(
                                             points = uiState.displayChartPoints,
                                             chartMode = ChartMode.COST,
+                                            referencePrice = uiState.flexiblePrice,
+                                            cheapThresholdPercent = uiState.cheapThresholdPercent,
+                                            moderateThresholdPercent = uiState.moderateThresholdPercent,
                                             onPointTapped = viewModel::onPointTapped,
-                                            modifier = Modifier.padding(horizontal = 8.dp)
+                                            modifier = Modifier.padding(horizontal = 8.dp),
+                                            useCalendarMonthBinning = useCalendarMonthBinning,
+                                            useCalendarDayBinning = useCalendarDayBinning,
                                         )
                                     }
                                     if (uiState.isChartLoading) {
