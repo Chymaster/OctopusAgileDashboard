@@ -37,9 +37,11 @@ Curious how green your electricity is right now? A real-time donut chart shows t
 **📈 Dashboard Analytics**
 Connect your Octopus Energy account to unlock detailed historical analysis:
 • Total cost, usage, and average price over any time range (7 days, 1 month, 6 months, 1 year, or custom dates)
-• Dual-axis chart combining price bars with your actual consumption line
-• Cost breakdown separating usage charges from standing charges
-• Usage zone analysis showing how much of your consumption fell in cheap, moderate, or expensive price bands
+• Dual-axis chart combining price bars with your actual consumption line — both colour-coded into green/amber/red price zones
+• Calendar-aligned bins (daily for 7D, monthly for 6M/1Y) so bars align with natural billing periods
+• Cost chart with stacked zone-breakdown bars showing how much you spent in cheap, moderate, and expensive price bands
+• Cost breakdown with donut chart separating usage costs from standing charges, plus per-zone usage cost split
+• Usage zone analysis showing how much of your consumption fell in each price band
 
 **🔮 Future Prices**
 Plan ahead with a full price schedule up to 2 days in the future. Prices are grouped by date with the current slot highlighted, so you can find the best time to charge your EV, run your heat pump, or do the laundry.
@@ -51,8 +53,10 @@ Plan ahead with a full price schedule up to 2 days in the future. Prices are gro
 
 ## What's new
 
-• Beautiful price gauge and grid mix visualisation on the home screen
-• Historical cost and usage analytics with interactive charts
-• Future price schedule with colour-coded time slots
-• Customisable price thresholds
-• Offline-first — shows cached data instantly, refreshes in the background
+• Stacked green/amber/red zone-breakdown bars for both Usage and Cost charts
+• Calendar-day and calendar-month binning so bars align with natural billing periods
+• Donut chart in Cost Breakdown showing per-zone usage cost split
+• Thick Canvas-drawn bars with smooth rounded corners for cleaner visuals
+• Loading indicator while switching date ranges
+• Mutually exclusive detail sheets — opening one dismisses others
+• Bug fixes and performance improvements
