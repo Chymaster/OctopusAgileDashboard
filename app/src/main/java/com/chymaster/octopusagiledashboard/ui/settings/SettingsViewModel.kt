@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.chymaster.octopusagiledashboard.core.util.Constants
 import com.chymaster.octopusagiledashboard.data.prefs.UserPreferencesRepository
+import com.chymaster.octopusagiledashboard.data.repository.OctopusRepository
 import com.chymaster.octopusagiledashboard.domain.usecase.TestConnectionUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -25,13 +26,18 @@ data class SettingsUiState(
     val isSaving: Boolean = false,
     val connectionTestState: ConnectionTestState = ConnectionTestState.Idle,
     val saveSuccess: Boolean = false,
-    val error: String? = null
+    val error: String? = null,
+    // Auto-fetch serial number fields
+    val serialNumbers: List<String> = emptyList(),
+    val isFetchingSerials: Boolean = false,
+    val serialFetchError: String? = null
 ) {
     override fun toString(): String =
         "SettingsUiState(apiKey=***, mpan=$mpan, serialNumber=$serialNumber, gsp=$gsp, " +
             "productCode=$productCode, flexibleProductCode=$flexibleProductCode, " +
             "tariffCode=$tariffCode, isSaving=$isSaving, connectionTestState=$connectionTestState, " +
-            "saveSuccess=$saveSuccess, error=$error)"
+            "saveSuccess=$saveSuccess, error=$error, " +
+            "serialNumbers=$serialNumbers, isFetchingSerials=$isFetchingSerials, serialFetchError=$serialFetchError)"
 }
 
 sealed interface ConnectionTestState {
@@ -44,7 +50,8 @@ sealed interface ConnectionTestState {
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val preferencesRepository: UserPreferencesRepository,
-    private val testConnectionUseCase: TestConnectionUseCase
+    private val testConnectionUseCase: TestConnectionUseCase,
+    private val octopusRepository: OctopusRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
@@ -97,6 +104,53 @@ class SettingsViewModel @Inject constructor(
         _uiState.value = _uiState.value.copy(serialNumber = value, error = null)
     }
 
+    /**
+     * Called when the user selects a serial number from the dropdown
+     * (or when a single serial is auto-selected).
+     */
+    fun onSerialNumberSelected(serial: String) {
+        _uiState.value = _uiState.value.copy(
+            serialNumber = serial,
+            serialFetchError = null
+        )
+        // Persist immediately so demo mode turns off.
+        viewModelScope.launch {
+            preferencesRepository.saveSerialNumber(serial)
+        }
+    }
+
+    /**
+     * Fetches meter serial numbers from the Octopus API for the given MPAN.
+     * If a single serial is returned, auto-selects it. If multiple, populates
+     * the dropdown list. Updates [SettingsUiState.isFetchingSerials],
+     * [SettingsUiState.serialNumbers], and [SettingsUiState.serialFetchError].
+     */
+    private fun fetchMeterSerials(mpan: String) {
+        _uiState.value = _uiState.value.copy(
+            isFetchingSerials = true,
+            serialFetchError = null
+        )
+
+        viewModelScope.launch {
+            val result = octopusRepository.fetchMeterSerials(mpan)
+            result.onSuccess { serials ->
+                _uiState.value = _uiState.value.copy(
+                    isFetchingSerials = false,
+                    serialNumbers = serials
+                )
+                // Auto-select if there's exactly one serial.
+                if (serials.size == 1) {
+                    onSerialNumberSelected(serials.first())
+                }
+            }.onFailure { e ->
+                _uiState.value = _uiState.value.copy(
+                    isFetchingSerials = false,
+                    serialFetchError = e.message ?: "Failed to fetch meter serial number"
+                )
+            }
+        }
+    }
+
     fun onGspChange(value: String) {
         _uiState.value = _uiState.value.copy(gsp = value, error = null)
         updateTariffCode()
@@ -140,6 +194,14 @@ class SettingsViewModel @Inject constructor(
                 state.flexibleProductCode.ifBlank { Constants.FLEXIBLE_PRODUCT_CODE }
             )
             _uiState.value = _uiState.value.copy(isSaving = false, saveSuccess = true)
+
+            // Auto-fetch serial number if API key + MPAN are set but serial is blank.
+            val updatedState = _uiState.value
+            if (updatedState.apiKey.isNotBlank() && updatedState.mpan.isNotBlank()
+                && updatedState.serialNumber.isBlank()
+            ) {
+                fetchMeterSerials(updatedState.mpan)
+            }
         }
     }
 
@@ -175,6 +237,14 @@ class SettingsViewModel @Inject constructor(
                     ConnectionTestState.Error(result.exceptionOrNull()?.message ?: "Unknown error")
                 }
             )
+
+            // Auto-fetch serial number if connection was successful and serial is blank.
+            if (result.isSuccess) {
+                val updatedState = _uiState.value
+                if (updatedState.serialNumber.isBlank()) {
+                    fetchMeterSerials(updatedState.mpan)
+                }
+            }
         }
     }
 
