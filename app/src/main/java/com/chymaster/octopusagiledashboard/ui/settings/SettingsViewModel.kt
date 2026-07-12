@@ -132,13 +132,13 @@ class SettingsViewModel @Inject constructor(
         )
 
         viewModelScope.launch {
+            // Fetch serial numbers from the meter-point endpoint.
             val result = octopusRepository.fetchMeterSerials(mpan)
             result.onSuccess { serials ->
                 _uiState.value = _uiState.value.copy(
                     isFetchingSerials = false,
                     serialNumbers = serials
                 )
-                // Auto-select if there's exactly one serial.
                 if (serials.size == 1) {
                     onSerialNumberSelected(serials.first())
                 }
@@ -147,6 +147,14 @@ class SettingsViewModel @Inject constructor(
                     isFetchingSerials = false,
                     serialFetchError = e.message ?: "Failed to fetch meter serial number"
                 )
+            }
+
+            // Also auto-populate the GSP from the API (reliably returned).
+            val gspResult = octopusRepository.fetchMeterGsp(mpan)
+            gspResult.onSuccess { apiGsp ->
+                _uiState.value = _uiState.value.copy(gsp = apiGsp)
+                updateTariffCode()
+                preferencesRepository.saveGsp(apiGsp)
             }
         }
     }

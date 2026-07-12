@@ -53,10 +53,7 @@ Plan ahead with a full price schedule up to 2 days in the future. Prices are gro
 
 ## What's new
 
-• Stacked green/amber/red zone-breakdown bars for both Usage and Cost charts
-• Calendar-day and calendar-month binning so bars align with natural billing periods
-• Donut chart in Cost Breakdown showing per-zone usage cost split
-• Thick Canvas-drawn bars with smooth rounded corners for cleaner visuals
-• Loading indicator while switching date ranges
-• Mutually exclusive detail sheets — opening one dismisses others
+• Zone-breakdown bars in Usage and Cost charts (green/amber/red)
+• Calendar-aligned bins and per-zone cost donut chart
+• Smoother, thicker chart bars with loading indicator
 • Bug fixes and performance improvements

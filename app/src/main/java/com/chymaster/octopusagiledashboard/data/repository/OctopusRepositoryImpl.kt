@@ -1,5 +1,6 @@
 package com.chymaster.octopusagiledashboard.data.repository
 
+import com.chymaster.octopusagiledashboard.core.network.OctopusGraphQLClient
 import com.chymaster.octopusagiledashboard.core.util.Constants
 import com.chymaster.octopusagiledashboard.core.util.DemoDataGenerator
 import com.chymaster.octopusagiledashboard.data.local.StandingChargeCacheStore
@@ -21,6 +22,9 @@ import com.chymaster.octopusagiledashboard.domain.model.HalfHourPoint
 import com.chymaster.octopusagiledashboard.domain.model.StandingCharge
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Dispatchers
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.channelFlow
@@ -43,6 +47,7 @@ import javax.inject.Singleton
 @Singleton
 class OctopusRepositoryImpl @Inject constructor(
     private val apiService: OctopusApiService,
+    private val graphQLClient: OctopusGraphQLClient,
     private val preferencesRepository: UserPreferencesRepository,
     private val agilePriceDao: AgilePriceDao,
     private val consumptionDao: ConsumptionDao,
@@ -332,6 +337,8 @@ class OctopusRepositoryImpl @Inject constructor(
             cachedFlexiblePriceTime = null
             // Clear other cache stores
             standingChargeCacheStore.clear()
+            // Clear Kraken GraphQL token so it's re-obtained with new creds
+            graphQLClient.clearCache()
         }
     }
 
@@ -450,23 +457,47 @@ class OctopusRepositoryImpl @Inject constructor(
     override suspend fun fetchMeterSerials(mpan: String): Result<List<String>> {
         return withContext(Dispatchers.IO) {
             try {
-                val response = apiService.getMeterPoint(mpan)
-                if (response.isSuccessful) {
-                    val body = response.body()
-                        ?: return@withContext Result.failure(ApiError.NoDataError("Empty response"))
-                    val serials = body.meters.map { it.serialNumber }
-                    if (serials.isEmpty()) {
-                        Result.failure(ApiError.NoDataError("No meters found for this MPAN"))
-                    } else {
-                        Result.success(serials)
-                    }
+                val query = """{ meterPoints(mpan: "$mpan") { meters { serialNumber } } }"""
+                val result = graphQLClient.execute(query)
+
+                if (result.isFailure) {
+                    val error = result.exceptionOrNull()
+                    return@withContext Result.failure(
+                        ApiError.NoDataError(
+                            error?.message
+                                ?: "Failed to fetch meter serials — " +
+                                    "check your API key and MPAN."
+                        )
+                    )
+                }
+
+                val data = result.getOrThrow()
+                val meterPoints = data["meterPoints"]?.jsonObject
+                    ?: return@withContext Result.failure(
+                        ApiError.NoDataError("No meter point data returned")
+                    )
+
+                val meters = meterPoints["meters"]?.jsonArray
+                    ?: return@withContext Result.failure(
+                        ApiError.NoDataError("No meters data returned")
+                    )
+
+                val serials = meters.map { meter ->
+                    meter.jsonObject["serialNumber"]!!.jsonPrimitive.content
+                }
+
+                if (serials.isEmpty()) {
+                    Result.failure(
+                        ApiError.NoDataError(
+                            "Enter your meter serial number manually — " +
+                                "find it on your Octopus dashboard or physical meter."
+                        )
+                    )
                 } else {
-                    Result.failure(ApiError.fromHttpCode(response.code()))
+                    Result.success(serials)
                 }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
-            } catch (e: ApiError) {
-                Result.failure(e)
             } catch (e: java.io.IOException) {
                 Result.failure(ApiError.NetworkError(cause = e))
             } catch (e: Exception) {
