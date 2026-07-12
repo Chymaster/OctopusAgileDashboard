@@ -447,6 +447,34 @@ class OctopusRepositoryImpl @Inject constructor(
         }
     }
 
+    override suspend fun fetchMeterSerials(mpan: String): Result<List<String>> {
+        return withContext(Dispatchers.IO) {
+            try {
+                val response = apiService.getMeterPoint(mpan)
+                if (response.isSuccessful) {
+                    val body = response.body()
+                        ?: return@withContext Result.failure(ApiError.NoDataError("Empty response"))
+                    val serials = body.meters.map { it.serialNumber }
+                    if (serials.isEmpty()) {
+                        Result.failure(ApiError.NoDataError("No meters found for this MPAN"))
+                    } else {
+                        Result.success(serials)
+                    }
+                } else {
+                    Result.failure(ApiError.fromHttpCode(response.code()))
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: ApiError) {
+                Result.failure(e)
+            } catch (e: java.io.IOException) {
+                Result.failure(ApiError.NetworkError(cause = e))
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
+        }
+    }
+
     override suspend fun testConnection(): Result<Unit> {
         return withContext(Dispatchers.IO) {
             try {

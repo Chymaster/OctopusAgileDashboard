@@ -40,6 +40,8 @@ interface OctopusRepository {
 
     suspend fun fetchMeterGsp(mpan: String): Result<String>
 
+    suspend fun fetchMeterSerials(mpan: String): Result<List<String>>
+
     suspend fun testConnection(): Result<Unit>
 
     suspend fun fetchFlexiblePrice(): Result<Double>
