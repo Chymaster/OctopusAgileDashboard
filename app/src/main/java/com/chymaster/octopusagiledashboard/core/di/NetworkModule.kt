@@ -16,6 +16,7 @@ import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import retrofit2.converter.kotlinx.serialization.asConverterFactory
 import java.util.concurrent.TimeUnit
+import javax.inject.Named
 import javax.inject.Singleton
 
 @Module
@@ -82,5 +83,24 @@ object NetworkModule {
             .build()
 
         return retrofit.create(CarbonIntensityApiService::class.java)
+    }
+
+    // ── GraphQL (Kraken) ────────────────────────────────────────────
+
+    @Provides
+    @Singleton
+    @Named("graphql")
+    fun provideGraphQLOkHttpClient(): OkHttpClient {
+        val loggingInterceptor = HttpLoggingInterceptor().apply {
+            level = HttpLoggingInterceptor.Level.BODY
+            redactHeader("Authorization")
+        }
+        return OkHttpClient.Builder()
+            .addInterceptor(RetryInterceptor())
+            .addInterceptor(loggingInterceptor)
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
+            .writeTimeout(30, TimeUnit.SECONDS)
+            .build()
     }
 }

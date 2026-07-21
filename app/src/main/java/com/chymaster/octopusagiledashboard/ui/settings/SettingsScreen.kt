@@ -62,6 +62,7 @@ fun SettingsScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     var passwordVisible by remember { mutableStateOf(false) }
     var gspExpanded by remember { mutableStateOf(false) }
+    var serialDropdownExpanded by remember { mutableStateOf(false) }
 
     LaunchedEffect(uiState.saveSuccess) {
         if (uiState.saveSuccess) {
@@ -148,14 +149,115 @@ fun SettingsScreen(
                 singleLine = true
             )
 
-            // Serial Number
-            OutlinedTextField(
-                value = uiState.serialNumber,
-                onValueChange = viewModel::onSerialNumberChange,
-                label = { Text("Meter Serial Number") },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true
-            )
+            // Serial Number — auto-fetched or manual
+            when {
+                // Loading: API key + MPAN saved, fetching serials from API
+                uiState.isFetchingSerials -> {
+                    OutlinedTextField(
+                        value = "Fetching meter serial number...",
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Meter Serial Number") },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = false,
+                        trailingIcon = {
+                            CircularProgressIndicator(
+                                modifier = Modifier.padding(end = 8.dp).height(16.dp)
+                            )
+                        },
+                        singleLine = true
+                    )
+                }
+                // Multiple serials returned — user picks via dropdown
+                uiState.serialNumbers.size > 1 -> {
+                    ExposedDropdownMenuBox(
+                        expanded = serialDropdownExpanded,
+                        onExpandedChange = { serialDropdownExpanded = !serialDropdownExpanded }
+                    ) {
+                        OutlinedTextField(
+                            value = uiState.serialNumber.ifBlank { "Select a meter" },
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("Meter Serial Number") },
+                            trailingIcon = {
+                                ExposedDropdownMenuDefaults.TrailingIcon(expanded = serialDropdownExpanded)
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable),
+                            singleLine = true
+                        )
+                        ExposedDropdownMenu(
+                            expanded = serialDropdownExpanded,
+                            onDismissRequest = { serialDropdownExpanded = false }
+                        ) {
+                            uiState.serialNumbers.forEach { serial ->
+                                DropdownMenuItem(
+                                    text = { Text(serial) },
+                                    onClick = {
+                                        viewModel.onSerialNumberSelected(serial)
+                                        serialDropdownExpanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+                // Single serial auto-selected — show read-only
+                uiState.serialNumbers.size == 1 -> {
+                    OutlinedTextField(
+                        value = uiState.serialNumber,
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Meter Serial Number") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        supportingText = {
+                            Text("Auto-populated from your MPAN")
+                        }
+                    )
+                }
+                // Error fetching serials — allow manual entry with error hint
+                uiState.serialFetchError != null -> {
+                    OutlinedTextField(
+                        value = uiState.serialNumber,
+                        onValueChange = viewModel::onSerialNumberChange,
+                        label = { Text("Meter Serial Number") },
+                        modifier = Modifier.fillMaxWidth(),
+                        isError = true,
+                        supportingText = {
+                            Text(uiState.serialFetchError ?: "")
+                        },
+                        singleLine = true
+                    )
+                }
+                // No API key/MPAN saved yet, no existing serial — disabled
+                uiState.serialNumber.isBlank() -> {
+                    OutlinedTextField(
+                        value = "",
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Meter Serial Number") },
+                        placeholder = { Text("Auto-fetched after save") },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = false,
+                        supportingText = {
+                            Text("Save your API key and MPAN to auto-populate")
+                        },
+                        singleLine = true
+                    )
+                }
+                // Existing serial number from previous session — editable
+                else -> {
+                    OutlinedTextField(
+                        value = uiState.serialNumber,
+                        onValueChange = viewModel::onSerialNumberChange,
+                        label = { Text("Meter Serial Number") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+                }
+            }
 
             // Region (GSP) dropdown
             ExposedDropdownMenuBox(
