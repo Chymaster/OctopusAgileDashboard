@@ -30,14 +30,20 @@ data class SettingsUiState(
     // Auto-fetch serial number fields
     val serialNumbers: List<String> = emptyList(),
     val isFetchingSerials: Boolean = false,
-    val serialFetchError: String? = null
+    val serialFetchError: String? = null,
+    // Auto-fetch account number fields
+    val accountNumber: String = "",
+    val accountNumbers: List<String> = emptyList(),
+    val isFetchingAccount: Boolean = false,
+    val accountFetchError: String? = null
 ) {
     override fun toString(): String =
         "SettingsUiState(apiKey=***, mpan=$mpan, serialNumber=$serialNumber, gsp=$gsp, " +
             "productCode=$productCode, flexibleProductCode=$flexibleProductCode, " +
             "tariffCode=$tariffCode, isSaving=$isSaving, connectionTestState=$connectionTestState, " +
             "saveSuccess=$saveSuccess, error=$error, " +
-            "serialNumbers=$serialNumbers, isFetchingSerials=$isFetchingSerials, serialFetchError=$serialFetchError)"
+            "serialNumbers=$serialNumbers, isFetchingSerials=$isFetchingSerials, serialFetchError=$serialFetchError, " +
+            "accountNumber=$accountNumber, accountNumbers=$accountNumbers, isFetchingAccount=$isFetchingAccount, accountFetchError=$accountFetchError)"
 }
 
 sealed interface ConnectionTestState {
@@ -72,6 +78,11 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             preferencesRepository.serialNumberFlow.collect { serial ->
                 _uiState.value = _uiState.value.copy(serialNumber = serial ?: "")
+            }
+        }
+        viewModelScope.launch {
+            preferencesRepository.accountNumberFlow.collect { account ->
+                _uiState.value = _uiState.value.copy(accountNumber = account ?: "")
             }
         }
         viewModelScope.launch {
@@ -116,6 +127,54 @@ class SettingsViewModel @Inject constructor(
         // Persist immediately so demo mode turns off.
         viewModelScope.launch {
             preferencesRepository.saveSerialNumber(serial)
+        }
+    }
+
+    fun onAccountNumberChange(value: String) {
+        _uiState.value = _uiState.value.copy(accountNumber = value, error = null)
+    }
+
+    /**
+     * Called when the user selects an account number from the dropdown
+     * (or when a single account is auto-selected).
+     */
+    fun onAccountNumberSelected(number: String) {
+        _uiState.value = _uiState.value.copy(
+            accountNumber = number,
+            accountFetchError = null
+        )
+        viewModelScope.launch {
+            preferencesRepository.saveAccountNumber(number)
+        }
+    }
+
+    /**
+     * Fetches account numbers from the Octopus API via the viewer query.
+     * If a single account is returned, auto-selects it. If multiple, populates
+     * the dropdown list.
+     */
+    private fun fetchAccountNumbers() {
+        _uiState.value = _uiState.value.copy(
+            isFetchingAccount = true,
+            accountFetchError = null
+        )
+
+        viewModelScope.launch {
+            val result = octopusRepository.fetchAccountNumbers()
+            result.onSuccess { numbers ->
+                _uiState.value = _uiState.value.copy(
+                    isFetchingAccount = false,
+                    accountNumbers = numbers
+                )
+                if (numbers.size == 1) {
+                    onAccountNumberSelected(numbers.first())
+                }
+            }.onFailure { e ->
+                _uiState.value = _uiState.value.copy(
+                    isFetchingAccount = false,
+                    accountFetchError = e.message ?: "Failed to fetch account number"
+                )
+            }
         }
     }
 
@@ -210,6 +269,13 @@ class SettingsViewModel @Inject constructor(
             ) {
                 fetchMeterSerials(updatedState.mpan)
             }
+
+            // Auto-fetch account number if API key is set but account is blank.
+            if (updatedState.apiKey.isNotBlank()
+                && updatedState.accountNumber.isBlank()
+            ) {
+                fetchAccountNumbers()
+            }
         }
     }
 
@@ -251,6 +317,9 @@ class SettingsViewModel @Inject constructor(
                 val updatedState = _uiState.value
                 if (updatedState.serialNumber.isBlank()) {
                     fetchMeterSerials(updatedState.mpan)
+                }
+                if (updatedState.accountNumber.isBlank()) {
+                    fetchAccountNumbers()
                 }
             }
         }

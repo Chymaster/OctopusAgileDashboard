@@ -8,4 +8,5 @@ object Routes {
     const val PRICE_THRESHOLDS = "price_thresholds"
     const val STATUS = "status"
     const val FUTURE_PRICES = "future_prices"
+    const val TARIFF_COMPARISON = "tariff_comparison"
 }
