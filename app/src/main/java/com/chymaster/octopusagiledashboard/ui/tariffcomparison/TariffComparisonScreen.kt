@@ -83,10 +83,10 @@ fun TariffComparisonScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     var showDatePicker by remember { mutableStateOf(false) }
     var chartGroup by remember { mutableStateOf(SavingsGraph.OVER_TIME) }
-    // Which way the saving is signed. "How much will I save" = current − selected
-    // (the use-case default); "What I am saving" = selected − current (negated).
+    // Which way the saving is signed. "What I am saving" = selected − current
+    // (default); "How much will I save" = current − selected (negated).
     var savingPerspective by rememberSaveable {
-        mutableStateOf(SavingPerspective.HOW_MUCH_WILL_I_SAVE)
+        mutableStateOf(SavingPerspective.WHAT_I_AM_SAVING)
     }
     // +1 keeps current − selected; −1 flips to selected − current.
     val savingSign = if (savingPerspective == SavingPerspective.WHAT_I_AM_SAVING) -1.0 else 1.0
