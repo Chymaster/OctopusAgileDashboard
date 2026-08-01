@@ -46,16 +46,35 @@ fun UsageZoneBreakdownSheet(
     if (!visible) return
 
     val totalKwh = greenKwh + amberKwh + redKwh
-    val greenPct = if (totalKwh > 0) greenKwh / totalKwh * 100 else 0.0
-    val amberPct = if (totalKwh > 0) amberKwh / totalKwh * 100 else 0.0
-    val redPct = if (totalKwh > 0) redKwh / totalKwh * 100 else 0.0
 
     val zones = remember(greenKwh, amberKwh, redKwh) {
-        listOf(
-            ZoneEntry("Cheap", PriceColors.Cheap, greenPct, greenKwh),
-            ZoneEntry("Moderate", PriceColors.Moderate, amberPct, amberKwh),
-            ZoneEntry("Expensive", PriceColors.Expensive, redPct, redKwh)
-        ).filter { it.percentage > 0.0 || it.kwh > 0.0 }
+        val raw = listOf(
+            Triple("Cheap", PriceColors.Cheap, greenKwh),
+            Triple("Moderate", PriceColors.Moderate, amberKwh),
+            Triple("Expensive", PriceColors.Expensive, redKwh)
+        ).filter { it.third > 0.0 }
+
+        if (raw.isEmpty() || totalKwh <= 0.0) return@remember emptyList()
+
+        // Displayed percentages that sum to exactly 100 (largest-remainder
+        // method), so the legend never shows e.g. 60% + 36% + 3% = 99% because
+        // each share was rounded independently. The donut still uses the raw
+        // double percentage so its arcs match the true proportions.
+        val rawPct = raw.map { it.third / totalKwh * 100.0 }
+        val floored = rawPct.map { kotlin.math.floor(it).toInt() }
+        var remainder = 100 - floored.sum()
+        val order = raw.indices.sortedByDescending { rawPct[it] - floored[it] }
+        val displayPct = floored.toMutableList()
+        var idx = 0
+        while (remainder > 0) {
+            displayPct[order[idx % order.size]] += 1
+            remainder--
+            idx++
+        }
+
+        raw.mapIndexed { i, (label, color, kwh) ->
+            ZoneEntry(label, color, rawPct[i], displayPct[i], kwh)
+        }
     }
 
     Card(
@@ -156,7 +175,7 @@ fun UsageZoneBreakdownSheet(
                     ZoneLegendRow(
                         color = zone.color,
                         label = zone.label,
-                        percentage = zone.percentage,
+                        displayPct = zone.displayPct,
                         kwh = zone.kwh
                     )
                 }
@@ -169,7 +188,7 @@ fun UsageZoneBreakdownSheet(
 private fun ZoneLegendRow(
     color: Color,
     label: String,
-    percentage: Double,
+    displayPct: Int,
     kwh: Double,
     modifier: Modifier = Modifier
 ) {
@@ -189,7 +208,7 @@ private fun ZoneLegendRow(
             modifier = Modifier.weight(1f)
         )
         Text(
-            text = String.format(java.util.Locale.UK, "%.0f%%", percentage),
+            text = String.format(java.util.Locale.UK, "%d%%", displayPct),
             style = MaterialTheme.typography.bodyMedium,
             fontWeight = FontWeight.Bold
         )
@@ -206,5 +225,6 @@ private data class ZoneEntry(
     val label: String,
     val color: Color,
     val percentage: Double,
+    val displayPct: Int,
     val kwh: Double
 )

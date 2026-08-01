@@ -104,14 +104,26 @@ fun CanvasBarChart(
     val canvasHeight = 260.dp
     val density = LocalDensity.current
 
+    // Bar metrics (px). Scroll mode draws bars at a fixed width; if the bar
+    // count would make the scrollable width exceed what Compose's Constraints
+    // can represent (~262142 px), scale the bar width down so the chart stays
+    // scrollable instead of crashing layout (e.g. zoomed 6M/1Y charts).
+    val barWidthPx = with(density) { fixedBarWidthDp.toPx() }
+    val gapPx = with(density) { gapDp.toPx() }
+    val maxScrollWidthPx = 240_000f
+    val rawScrollWidthPx = chartBarCount * barWidthPx + (chartBarCount - 1) * gapPx
+    val scrollScale = if (rawScrollWidthPx > maxScrollWidthPx) {
+        maxScrollWidthPx / rawScrollWidthPx
+    } else {
+        1f
+    }
+    val effBarWidthPx = barWidthPx * scrollScale
+    val effGapPx = gapPx * scrollScale
+    val effScrollWidthPx = chartBarCount * effBarWidthPx + (chartBarCount - 1) * effGapPx
+
     val scrollModifier = if (isScrollable) {
-        val totalBarWidthPx = with(density) {
-            val barW = fixedBarWidthDp.toPx()
-            val g = gapDp.toPx()
-            (chartBarCount * barW + (chartBarCount - 1) * g).toDp()
-        }
         // Add padding for Y-axis labels
-        val canvasWidth = totalBarWidthPx + 44.dp
+        val canvasWidth = with(density) { (effScrollWidthPx + 44.dp.toPx()).toDp() }
         Modifier
             .horizontalScroll(rememberScrollState())
             .width(canvasWidth)
@@ -129,16 +141,14 @@ fun CanvasBarChart(
                         val chartLeft = 36.dp.toPx()
                         val rightPad = if (hasUsageLine) 36.dp.toPx() else 4.dp.toPx()
                         val chartRight = if (isScrollable) {
-                            val barW = fixedBarWidthDp.toPx()
-                            val g = gapDp.toPx()
-                            chartLeft + chartBarCount * (barW + g)
+                            chartLeft + chartBarCount * (effBarWidthPx + effGapPx)
                         } else {
                             size.width.toFloat() - rightPad
                         }
                         val chartWidth = chartRight - chartLeft
                         val gap = gapDp.toPx()
                         val barWidth = if (isScrollable) {
-                            fixedBarWidthDp.toPx()
+                            effBarWidthPx
                         } else {
                             (chartWidth - gap * (chartBarCount - 1)) / chartBarCount
                         }
@@ -154,9 +164,7 @@ fun CanvasBarChart(
                     val chartLeft = 36.dp.toPx()
                     val rightPad = if (hasUsageLine) 36.dp.toPx() else 4.dp.toPx()
                     val chartRight = if (isScrollable) {
-                        val barW = fixedBarWidthDp.toPx()
-                        val g = gapDp.toPx()
-                        chartLeft + chartBarCount * (barW + g)
+                        chartLeft + chartBarCount * (effBarWidthPx + effGapPx)
                     } else {
                         size.width - rightPad
                     }
@@ -166,7 +174,7 @@ fun CanvasBarChart(
                     val chartHeight = chartBottom - chartTop
                     val gap = gapDp.toPx()
                     val barWidth = if (isScrollable) {
-                        fixedBarWidthDp.toPx()
+                        effBarWidthPx
                     } else {
                         (chartWidth - gap * (chartBarCount - 1)) / chartBarCount
                     }

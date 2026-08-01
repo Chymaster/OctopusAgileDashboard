@@ -42,7 +42,10 @@ fun PriceLineChart(
     cheapThresholdPercent: Int = PriceColors.DEFAULT_CHEAP_PERCENT,
     moderateThresholdPercent: Int = PriceColors.DEFAULT_MODERATE_PERCENT,
 ) {
-    var isZoomed by remember { mutableStateOf(false) }
+    // Reset zoom whenever the data changes (range switch / refresh) so the
+    // chart returns to the binned overview instead of showing every half-hour
+    // bar for a multi-month range.
+    var isZoomed by remember(points) { mutableStateOf(false) }
 
     // Enable zone breakdown only for COST mode when a reference price is available.
     val enableZoneBreakdown = chartMode == ChartMode.COST && referencePrice != null

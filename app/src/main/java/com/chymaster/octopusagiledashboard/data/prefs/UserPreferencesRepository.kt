@@ -16,6 +16,7 @@ import dagger.Lazy
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -162,6 +163,17 @@ class UserPreferencesRepository @Inject constructor(
     }
 
     suspend fun saveCredentials(apiKey: String, mpan: String, serialNumber: String, gsp: String, productCode: String) {
+        val prefs = dataStore.data.first()
+        val oldApiKey = secureApiKeyStore.getApiKey()
+        // Only wipe caches if the credentials actually changed. Re-saving
+        // identical values (e.g. tapping "Test Connection" or "Save" with no
+        // edits) shouldn't nuke cached dashboard data and force a full refetch.
+        val changed = apiKey != oldApiKey
+            || mpan != prefs[MPAN]
+            || serialNumber != prefs[SERIAL_NUMBER]
+            || gsp != prefs[GSP]
+            || productCode != prefs[PRODUCT_CODE]
+
         secureApiKeyStore.saveApiKey(apiKey)
         dataStore.edit { prefs ->
             prefs.remove(API_KEY) // Keep API key only in encrypted store
@@ -170,8 +182,10 @@ class UserPreferencesRepository @Inject constructor(
             prefs[GSP] = gsp
             prefs[PRODUCT_CODE] = productCode
         }
-        // Wipe both caches after credential change so no stale data from
+        // Wipe both caches after a credential change so no stale data from
         // the previous mode (demo or real) flashes on the next observation.
-        octopusRepository.get().wipeAllCaches()
+        if (changed) {
+            octopusRepository.get().wipeAllCaches()
+        }
     }
 }
