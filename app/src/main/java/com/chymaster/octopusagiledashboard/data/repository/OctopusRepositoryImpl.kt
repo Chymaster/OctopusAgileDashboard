@@ -38,6 +38,8 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import retrofit2.Response
 import java.time.Instant
@@ -85,6 +87,14 @@ class OctopusRepositoryImpl @Inject constructor(
 
     private var cachedFlexiblePrice: Double? = null
     private var cachedFlexiblePriceTime: Instant? = null
+
+    /**
+     * Serialises the Room check + API fetch in [getAgilePrices]. The dashboard
+     * calls it twice concurrently (observe pipeline background trigger + the
+     * refresh use case); without a lock both race past the in-memory/Room cache
+     * check and issue duplicate API fetches for the same range.
+     */
+    private val agilePriceFetchMutex = Mutex()
 
     companion object {
         /** 7 days — TTL for the flexible price in-memory cache. */
@@ -203,53 +213,66 @@ class OctopusRepositoryImpl @Inject constructor(
                 val generated = DemoDataGenerator.generateAgilePriceEntities(start, end, tariffCode)
                 agilePriceDao.insertAll(generated)
                 mergeAndEmitAgilePrices(generated, start, end)
-                return@withContext Result.success(generated.map { it.toDomain() })
-            }
-
-            // Tier 1: in-memory cache
-            val currentStart = cachedPricesStart
-            val currentEnd = cachedPricesEnd
-            if (currentStart != null && currentEnd != null &&
-                !start.isBefore(currentStart) && !end.isAfter(currentEnd)
-            ) {
-                val cached = _agilePrices.value
-                    .filter { it.validFrom >= start.toEpochMilli() && it.validTo <= end.toEpochMilli() }
-                return@withContext Result.success(cached.map { it.toDomain() })
-            }
-
-            // Tier 2: Room — check coverage
-            val startMs = start.toEpochMilli()
-            val endMs = end.toEpochMilli()
-            val expectedCount = ((endMs - startMs) / HALF_HOUR_MILLIS).toInt()
-
-            if (expectedCount <= 0) {
-                mergeAndEmitAgilePrices(emptyList(), start, end)
-                return@withContext Result.success(emptyList())
-            }
-
-            val actualCount = agilePriceDao.countInRange(startMs, endMs)
-            val entities = if (actualCount >= expectedCount) {
-                // Room has everything — read directly.
-                agilePriceDao.queryRange(startMs, endMs)
-            } else if (actualCount == 0) {
-                // Tier 3a: Room empty — fetch entire range from API.
-                val apiResult = fetchAndPersistAgilePrices(start, end)
-                if (apiResult.isSuccess) {
-                    agilePriceDao.queryRange(startMs, endMs)
-                } else {
-                    return@withContext Result.failure(
-                        apiResult.exceptionOrNull() ?: ApiError.NoDataError()
-                    )
-                }
+                Result.success(generated.map { it.toDomain() })
             } else {
-                // Tier 3b: partial data — detect and fill gaps.
-                fillAgilePriceGaps(start, end)
-                agilePriceDao.queryRange(startMs, endMs)
+                // Serialise the cache-check + fetch. The dashboard triggers this
+                // twice concurrently (observe pipeline + refresh use case); without
+                // a lock both race past the cache checks and duplicate API calls.
+                agilePriceFetchMutex.withLock {
+                    getAgilePricesFromCacheOrApi(start, end)
+                }
             }
-
-            mergeAndEmitAgilePrices(entities, start, end)
-            Result.success(entities.map { it.toDomain() })
         }
+    }
+
+    /**
+     * The Room/API-backed tier logic of [getAgilePrices], run while holding
+     * [agilePriceFetchMutex] so concurrent callers fetch at most once.
+     */
+    private suspend fun getAgilePricesFromCacheOrApi(start: Instant, end: Instant): Result<List<AgilePrice>> {
+        // Tier 1: in-memory cache
+        val currentStart = cachedPricesStart
+        val currentEnd = cachedPricesEnd
+        if (currentStart != null && currentEnd != null &&
+            !start.isBefore(currentStart) && !end.isAfter(currentEnd)
+        ) {
+            val cached = _agilePrices.value
+                .filter { it.validFrom >= start.toEpochMilli() && it.validTo <= end.toEpochMilli() }
+            return Result.success(cached.map { it.toDomain() })
+        }
+
+        // Tier 2: Room — check coverage
+        val startMs = start.toEpochMilli()
+        val endMs = end.toEpochMilli()
+        val expectedCount = ((endMs - startMs) / HALF_HOUR_MILLIS).toInt()
+
+        if (expectedCount <= 0) {
+            mergeAndEmitAgilePrices(emptyList(), start, end)
+            return Result.success(emptyList())
+        }
+
+        val actualCount = agilePriceDao.countInRange(startMs, endMs)
+        val entities = if (actualCount >= expectedCount) {
+            // Room has everything — read directly.
+            agilePriceDao.queryRange(startMs, endMs)
+        } else if (actualCount == 0) {
+            // Tier 3a: Room empty — fetch entire range from API.
+            val apiResult = fetchAndPersistAgilePrices(start, end)
+            if (apiResult.isSuccess) {
+                agilePriceDao.queryRange(startMs, endMs)
+            } else {
+                return Result.failure(
+                    apiResult.exceptionOrNull() ?: ApiError.NoDataError()
+                )
+            }
+        } else {
+            // Tier 3b: partial data — detect and fill gaps.
+            fillAgilePriceGaps(start, end)
+            agilePriceDao.queryRange(startMs, endMs)
+        }
+
+        mergeAndEmitAgilePrices(entities, start, end)
+        return Result.success(entities.map { it.toDomain() })
     }
 
     override suspend fun refreshStandingCharges(start: Instant, end: Instant): Result<Unit> {
@@ -962,11 +985,13 @@ class OctopusRepositoryImpl @Inject constructor(
             .map { it.intervalStart }
             .toSet()
 
-        // Find contiguous missing blocks.
+        // Find contiguous missing blocks. Iterate slots strictly within
+        // [start, end): the boundary slot at `end` is outside the range, so
+        // checking it would synthesise a bogus zero-length trailing gap.
         val gaps = mutableListOf<Pair<Instant, Instant>>()
         var gapStart: Instant? = null
         var t = start
-        while (!t.isAfter(end)) {
+        while (t.isBefore(end)) {
             if (t.toEpochMilli() !in existingSlots) {
                 if (gapStart == null) gapStart = t
             } else {
@@ -1001,11 +1026,13 @@ class OctopusRepositoryImpl @Inject constructor(
             .map { it.validFrom }
             .toSet()
 
-        // Find contiguous missing blocks.
+        // Find contiguous missing blocks. Iterate slots strictly within
+        // [start, end): the boundary slot at `end` is outside the range, so
+        // checking it would synthesise a bogus zero-length trailing gap.
         val gaps = mutableListOf<Pair<Instant, Instant>>()
         var gapStart: Instant? = null
         var t = start
-        while (!t.isAfter(end)) {
+        while (t.isBefore(end)) {
             if (t.toEpochMilli() !in existingSlots) {
                 if (gapStart == null) gapStart = t
             } else {
