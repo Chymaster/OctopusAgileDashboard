@@ -33,21 +33,21 @@ fun SummaryCards(
             .padding(horizontal = 16.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        SummaryCard(
+        StatCard(
             title = "Total Cost",
             value = if (totalCost != null) formatCost(totalCost) else "–",
             modifier = Modifier
                 .weight(1f)
                 .clickable(onClick = onTotalCostClick)
         )
-        SummaryCard(
+        StatCard(
             title = "Usage",
             value = if (totalKwh != null) String.format(java.util.Locale.UK, "%.1f kWh", totalKwh) else "–",
             modifier = Modifier
                 .weight(1f)
                 .clickable(onClick = onUsageClick)
         )
-        SummaryCard(
+        StatCard(
             title = "Avg Price",
             value = if (avgPrice != null) String.format(java.util.Locale.UK, "%.1f p/kWh", avgPrice) else "–",
             modifier = Modifier.weight(1f)
@@ -67,13 +67,13 @@ fun PriceRangeCards(
             .padding(horizontal = 16.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        SummaryCard(
+        StatCard(
             title = "Lowest",
             value = if (minPrice != null) String.format(java.util.Locale.UK, "%.1f p/kWh", minPrice) else "–",
             modifier = Modifier.weight(1f),
             valueColor = MaterialTheme.colorScheme.primary
         )
-        SummaryCard(
+        StatCard(
             title = "Highest",
             value = if (maxPrice != null) String.format(java.util.Locale.UK, "%.1f p/kWh", maxPrice) else "–",
             modifier = Modifier.weight(1f),
@@ -83,7 +83,7 @@ fun PriceRangeCards(
 }
 
 @Composable
-private fun SummaryCard(
+fun StatCard(
     title: String,
     value: String,
     modifier: Modifier = Modifier,
@@ -114,10 +114,12 @@ private fun SummaryCard(
     }
 }
 
-private fun formatCost(pence: Double): String {
-    return if (pence >= 100) {
-        String.format(java.util.Locale.UK, "£%.2f", pence / 100.0)
+fun formatCost(pence: Double): String {
+    val sign = if (pence < 0) "-" else ""
+    val abs = kotlin.math.abs(pence)
+    return if (abs >= 100) {
+        String.format(java.util.Locale.UK, "%s£%.2f", sign, abs / 100.0)
     } else {
-        String.format(java.util.Locale.UK, "%.1f p", pence)
+        String.format(java.util.Locale.UK, "%s%.1f p", sign, abs)
     }
 }

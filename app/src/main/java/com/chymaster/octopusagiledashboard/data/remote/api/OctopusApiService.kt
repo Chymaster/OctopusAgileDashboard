@@ -4,6 +4,7 @@ import com.chymaster.octopusagiledashboard.data.remote.dto.AgileRateDto
 import com.chymaster.octopusagiledashboard.data.remote.dto.ConsumptionDto
 import com.chymaster.octopusagiledashboard.data.remote.dto.MeterPointDto
 import com.chymaster.octopusagiledashboard.data.remote.dto.PaginatedResponse
+import com.chymaster.octopusagiledashboard.data.remote.dto.ProductDto
 import com.chymaster.octopusagiledashboard.data.remote.dto.StandingChargeDto
 import retrofit2.Response
 import retrofit2.http.GET
@@ -12,6 +13,14 @@ import retrofit2.http.Query
 import retrofit2.http.Url
 
 interface OctopusApiService {
+
+    @GET("products/")
+    suspend fun getProducts(): Response<PaginatedResponse<ProductDto>>
+
+    @GET
+    suspend fun getProductsByUrl(
+        @Url url: String
+    ): Response<PaginatedResponse<ProductDto>>
 
     @GET("products/{product}/electricity-tariffs/{tariff}/standard-unit-rates/")
     suspend fun getAgileRates(

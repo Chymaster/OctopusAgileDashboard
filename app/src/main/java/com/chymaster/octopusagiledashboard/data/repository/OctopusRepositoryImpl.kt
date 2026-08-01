@@ -15,11 +15,14 @@ import com.chymaster.octopusagiledashboard.data.remote.api.OctopusApiService
 import com.chymaster.octopusagiledashboard.data.remote.dto.AgileRateDto
 import com.chymaster.octopusagiledashboard.data.remote.dto.ConsumptionDto
 import com.chymaster.octopusagiledashboard.data.remote.dto.PaginatedResponse
+import com.chymaster.octopusagiledashboard.data.remote.dto.ProductDto
+import com.chymaster.octopusagiledashboard.data.remote.dto.StandingChargeDto
 import com.chymaster.octopusagiledashboard.domain.model.AgilePrice
 import com.chymaster.octopusagiledashboard.domain.model.ApiError
 import com.chymaster.octopusagiledashboard.domain.model.ConsumptionRecord
 import com.chymaster.octopusagiledashboard.domain.model.HalfHourPoint
 import com.chymaster.octopusagiledashboard.domain.model.StandingCharge
+import com.chymaster.octopusagiledashboard.domain.model.TariffOption
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Dispatchers
 import kotlinx.serialization.json.jsonArray
@@ -506,6 +509,55 @@ class OctopusRepositoryImpl @Inject constructor(
         }
     }
 
+    override suspend fun fetchAccountNumbers(): Result<List<String>> {
+        return withContext(Dispatchers.IO) {
+            try {
+                val query = """{ viewer { accounts { number } } }"""
+                val result = graphQLClient.execute(query)
+
+                if (result.isFailure) {
+                    val error = result.exceptionOrNull()
+                    return@withContext Result.failure(
+                        ApiError.NoDataError(
+                            error?.message
+                                ?: "Failed to fetch account number — " +
+                                    "check your API key."
+                        )
+                    )
+                }
+
+                val data = result.getOrThrow()
+                val viewer = data["viewer"]?.jsonObject
+                    ?: return@withContext Result.failure(
+                        ApiError.NoDataError("No viewer data returned")
+                    )
+
+                val accounts = viewer["accounts"]?.jsonArray
+                    ?: return@withContext Result.failure(
+                        ApiError.NoDataError("No accounts data returned")
+                    )
+
+                val numbers = accounts.map { account ->
+                    account.jsonObject["number"]!!.jsonPrimitive.content
+                }
+
+                if (numbers.isEmpty()) {
+                    Result.failure(
+                        ApiError.NoDataError("No accounts found — verify your API key.")
+                    )
+                } else {
+                    Result.success(numbers)
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: java.io.IOException) {
+                Result.failure(ApiError.NetworkError(cause = e))
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
+        }
+    }
+
     override suspend fun testConnection(): Result<Unit> {
         return withContext(Dispatchers.IO) {
             try {
@@ -517,6 +569,110 @@ class OctopusRepositoryImpl @Inject constructor(
                 } else {
                     Result.failure(ApiError.fromHttpCode(response.code()))
                 }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: ApiError) {
+                Result.failure(e)
+            } catch (e: java.io.IOException) {
+                Result.failure(ApiError.NetworkError(cause = e))
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
+        }
+    }
+
+    override suspend fun fetchAvailableTariffs(): Result<List<TariffOption>> {
+        return withContext(Dispatchers.IO) {
+            try {
+                val now = Instant.now()
+                val products = fetchAllPages<ProductDto> { url ->
+                    if (url != null) apiService.getProductsByUrl(url)
+                    else apiService.getProducts()
+                }
+                val options = products
+                    .filter { it.direction == "IMPORT" }
+                    .filter { it.isPrepay != true }
+                    .filter { it.brand == "OCTOPUS_ENERGY" }
+                    .filter { dto ->
+                        dto.availableFrom?.let { OffsetDateTime.parse(it).toInstant() <= now } ?: true
+                    }
+                    .filter { dto ->
+                        dto.availableTo?.let { OffsetDateTime.parse(it).toInstant() >= now } ?: true
+                    }
+                    .map { it.toDomain() }
+                    .distinctBy { it.id }
+                    .sortedBy { it.displayName.lowercase() }
+                Result.success(options)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: ApiError) {
+                Result.failure(e)
+            } catch (e: java.io.IOException) {
+                Result.failure(ApiError.NetworkError(cause = e))
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
+        }
+    }
+
+    override suspend fun fetchTariffRates(
+        productCode: String,
+        tariffCode: String,
+        start: Instant,
+        end: Instant
+    ): Result<List<AgilePrice>> {
+        return withContext(Dispatchers.IO) {
+            try {
+                val startStr = DateTimeFormatter.ISO_INSTANT.format(start)
+                val endStr = DateTimeFormatter.ISO_INSTANT.format(end)
+                val dtoRates = fetchAllAgilePages { url ->
+                    if (url != null) apiService.getAgileRatesByUrl(url)
+                    else apiService.getAgileRates(
+                        product = productCode,
+                        tariff = tariffCode,
+                        periodFrom = startStr,
+                        periodTo = endStr
+                    )
+                }
+                val rates = dedupeRatesByPaymentMethod(dtoRates)
+                    .map { it.toDomain() }
+                    .sortedBy { it.validFrom }
+                Result.success(rates)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: ApiError) {
+                Result.failure(e)
+            } catch (e: java.io.IOException) {
+                Result.failure(ApiError.NetworkError(cause = e))
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
+        }
+    }
+
+    override suspend fun fetchTariffStandingCharges(
+        productCode: String,
+        tariffCode: String,
+        start: Instant,
+        end: Instant
+    ): Result<List<StandingCharge>> {
+        return withContext(Dispatchers.IO) {
+            try {
+                val startStr = DateTimeFormatter.ISO_INSTANT.format(start)
+                val endStr = DateTimeFormatter.ISO_INSTANT.format(end)
+                val dtoCharges = fetchAllPages<StandingChargeDto> { url ->
+                    if (url != null) apiService.getStandingChargesByUrl(url)
+                    else apiService.getStandingCharges(
+                        product = productCode,
+                        tariff = tariffCode,
+                        periodFrom = startStr,
+                        periodTo = endStr
+                    )
+                }
+                val charges = dedupeStandingChargesByPaymentMethod(dtoCharges)
+                    .map { it.toDomain() }
+                    .sortedBy { it.validFrom }
+                Result.success(charges)
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: ApiError) {
@@ -646,6 +802,53 @@ class OctopusRepositoryImpl @Inject constructor(
 
         return allRates
     }
+
+    /**
+     * Generic pagination follower — the typed sibling of [fetchAllAgilePages].
+     * Used for the products catalogue and standing-charge fetches.
+     */
+    private suspend fun <T> fetchAllPages(
+        request: suspend (url: String?) -> Response<PaginatedResponse<T>>
+    ): List<T> {
+        val all = mutableListOf<T>()
+        var url: String? = null
+
+        do {
+            val response = request(url)
+            if (!response.isSuccessful) {
+                throw ApiError.fromHttpCode(response.code())
+            }
+            val body = response.body() ?: break
+            all.addAll(body.results)
+            url = body.next
+        } while (url != null)
+
+        return all
+    }
+
+    /**
+     * Collapse overlapping unit-rate entries that cover the same slot into a
+     * single rate, preferring DIRECT_DEBIT (e.g. Flexible Octopus returns both
+     * a DIRECT_DEBIT and a NON_DIRECT_DEBIT rate for the same period). The
+     * domain model drops `paymentMethod`, so this must happen before mapping.
+     */
+    private fun dedupeRatesByPaymentMethod(rates: List<AgileRateDto>): List<AgileRateDto> =
+        rates.groupBy { it.validFrom }.values.map { group ->
+            group.firstOrNull { it.paymentMethod == "DIRECT_DEBIT" }
+                ?: group.firstOrNull { it.paymentMethod == null }
+                ?: group.first()
+        }
+
+    /**
+     * Same payment-method collapse as [dedupeRatesByPaymentMethod] but for
+     * standing charges (Flexible also returns DD / non-DD variants).
+     */
+    private fun dedupeStandingChargesByPaymentMethod(charges: List<StandingChargeDto>): List<StandingChargeDto> =
+        charges.groupBy { it.validFrom }.values.map { group ->
+            group.firstOrNull { it.paymentMethod == "DIRECT_DEBIT" }
+                ?: group.firstOrNull { it.paymentMethod == null }
+                ?: group.first()
+        }
 
     // ── Consumption private helpers ─────────────────────────────────
 

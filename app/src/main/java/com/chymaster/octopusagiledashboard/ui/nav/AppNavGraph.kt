@@ -29,6 +29,7 @@ import com.chymaster.octopusagiledashboard.ui.settings.AdvancedSettingsScreen
 import com.chymaster.octopusagiledashboard.ui.settings.PriceThresholdsScreen
 import com.chymaster.octopusagiledashboard.ui.settings.SettingsScreen
 import com.chymaster.octopusagiledashboard.ui.settings.StatusScreen
+import com.chymaster.octopusagiledashboard.ui.tariffcomparison.TariffComparisonScreen
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -104,6 +105,16 @@ fun AppNavGraph(
                     exitTransition = { fadeOut(tween(200)) }
                 ) {
                     FuturePricesScreen(
+                        onBack = { navController.popBackStack() },
+                        onOpenDrawer = { scope.launch { drawerState.open() } }
+                    )
+                }
+                composable(
+                    Routes.TARIFF_COMPARISON,
+                    enterTransition = { fadeIn(tween(200)) },
+                    exitTransition = { fadeOut(tween(200)) }
+                ) {
+                    TariffComparisonScreen(
                         onBack = { navController.popBackStack() },
                         onOpenDrawer = { scope.launch { drawerState.open() } }
                     )

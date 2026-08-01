@@ -44,6 +44,7 @@ class UserPreferencesRepository @Inject constructor(
         val LAST_CONSUMPTION_REFRESH = longPreferencesKey("last_consumption_refresh")
         val CACHED_FLEXIBLE_PRICE = doublePreferencesKey("cached_flexible_price")
         val CACHED_FLEXIBLE_PRICE_TIMESTAMP = longPreferencesKey("cached_flexible_price_timestamp")
+        val ACCOUNT_NUMBER = stringPreferencesKey("account_number")
         val CHEAP_THRESHOLD_PERCENT = intPreferencesKey("cheap_threshold_percent")
         val MODERATE_THRESHOLD_PERCENT = intPreferencesKey("moderate_threshold_percent")
     }
@@ -70,6 +71,7 @@ class UserPreferencesRepository @Inject constructor(
     }
     val mpanFlow: Flow<String?> = dataStore.data.map { it[MPAN] }
     val serialNumberFlow: Flow<String?> = dataStore.data.map { it[SERIAL_NUMBER] }
+    val accountNumberFlow: Flow<String?> = dataStore.data.map { it[ACCOUNT_NUMBER] }
     val gspFlow: Flow<String?> = dataStore.data.map { it[GSP] }
     val productCodeFlow: Flow<String?> = dataStore.data.map { it[PRODUCT_CODE] }
     val flexibleProductCodeFlow: Flow<String?> = dataStore.data.map { it[FLEXIBLE_PRODUCT_CODE] }
@@ -103,6 +105,10 @@ class UserPreferencesRepository @Inject constructor(
 
     suspend fun saveSerialNumber(serialNumber: String) {
         dataStore.edit { it[SERIAL_NUMBER] = serialNumber }
+    }
+
+    suspend fun saveAccountNumber(accountNumber: String) {
+        dataStore.edit { it[ACCOUNT_NUMBER] = accountNumber }
     }
 
     suspend fun saveGsp(gsp: String) {

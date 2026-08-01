@@ -259,6 +259,107 @@ fun SettingsScreen(
                 }
             }
 
+            // Account Number — auto-fetched via viewer query, same pattern as serial number
+            var accountDropdownExpanded by remember { mutableStateOf(false) }
+            when {
+                // Fetching: API key saved, fetching accounts from API
+                uiState.isFetchingAccount -> {
+                    OutlinedTextField(
+                        value = "Fetching account number...",
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Account Number") },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = false,
+                        trailingIcon = {
+                            CircularProgressIndicator(
+                                modifier = Modifier.padding(end = 8.dp).height(16.dp)
+                            )
+                        },
+                        singleLine = true
+                    )
+                }
+                // Multiple accounts returned — user picks via dropdown
+                uiState.accountNumbers.size > 1 -> {
+                    ExposedDropdownMenuBox(
+                        expanded = accountDropdownExpanded,
+                        onExpandedChange = { accountDropdownExpanded = !accountDropdownExpanded }
+                    ) {
+                        OutlinedTextField(
+                            value = uiState.accountNumber.ifBlank { "Select an account" },
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("Account Number") },
+                            trailingIcon = {
+                                ExposedDropdownMenuDefaults.TrailingIcon(expanded = accountDropdownExpanded)
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable),
+                            singleLine = true
+                        )
+                        ExposedDropdownMenu(
+                            expanded = accountDropdownExpanded,
+                            onDismissRequest = { accountDropdownExpanded = false }
+                        ) {
+                            uiState.accountNumbers.forEach { number ->
+                                DropdownMenuItem(
+                                    text = { Text(number) },
+                                    onClick = {
+                                        viewModel.onAccountNumberSelected(number)
+                                        accountDropdownExpanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+                // Single account auto-selected — show read-only
+                uiState.accountNumbers.size == 1 -> {
+                    OutlinedTextField(
+                        value = uiState.accountNumber,
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Account Number") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        supportingText = {
+                            Text("Auto-populated from your API key")
+                        }
+                    )
+                }
+                // Error fetching — allow manual entry with error hint
+                uiState.accountFetchError != null -> {
+                    OutlinedTextField(
+                        value = uiState.accountNumber,
+                        onValueChange = viewModel::onAccountNumberChange,
+                        label = { Text("Account Number") },
+                        modifier = Modifier.fillMaxWidth(),
+                        isError = true,
+                        supportingText = {
+                            Text(uiState.accountFetchError ?: "")
+                        },
+                        singleLine = true
+                    )
+                }
+                // No API key saved yet — disabled placeholder
+                else -> {
+                    OutlinedTextField(
+                        value = "",
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Account Number") },
+                        placeholder = { Text("Auto-fetched after save") },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = false,
+                        supportingText = {
+                            Text("Save your API key to auto-populate")
+                        },
+                        singleLine = true
+                    )
+                }
+            }
+
             // Region (GSP) dropdown
             ExposedDropdownMenuBox(
                 expanded = gspExpanded,

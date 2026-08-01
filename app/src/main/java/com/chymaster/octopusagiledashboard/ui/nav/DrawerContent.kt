@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.CompareArrows
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Home
@@ -85,6 +86,16 @@ fun DrawerContent(
             selected = currentRoute == Routes.FUTURE_PRICES,
             onClick = {
                 onNavigate(Routes.FUTURE_PRICES)
+                onCloseDrawer()
+            }
+        )
+
+        NavigationDrawerItem(
+            label = { Text("Tariff Comparison") },
+            icon = { Icon(Icons.AutoMirrored.Filled.CompareArrows, contentDescription = null) },
+            selected = currentRoute == Routes.TARIFF_COMPARISON,
+            onClick = {
+                onNavigate(Routes.TARIFF_COMPARISON)
                 onCloseDrawer()
             }
         )

@@ -36,3 +36,14 @@ fun StandingChargeEntity.toDomain(): StandingCharge {
         valueIncVat = valueIncVat
     )
 }
+
+fun StandingChargeDto.toDomain(): StandingCharge {
+    val validFromInstant = OffsetDateTime.parse(validFrom).toInstant()
+    val validToInstant = parseStandingChargeEnd(validTo, validFromInstant)
+    return StandingCharge(
+        validFrom = validFromInstant,
+        validTo = validToInstant,
+        valueExcVat = valueExcVat,
+        valueIncVat = valueIncVat
+    )
+}

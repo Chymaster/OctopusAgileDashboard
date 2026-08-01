@@ -4,6 +4,7 @@ import com.chymaster.octopusagiledashboard.domain.model.AgilePrice
 import com.chymaster.octopusagiledashboard.domain.model.ConsumptionRecord
 import com.chymaster.octopusagiledashboard.domain.model.HalfHourPoint
 import com.chymaster.octopusagiledashboard.domain.model.StandingCharge
+import com.chymaster.octopusagiledashboard.domain.model.TariffOption
 import kotlinx.coroutines.flow.Flow
 import java.time.Instant
 
@@ -42,7 +43,40 @@ interface OctopusRepository {
 
     suspend fun fetchMeterSerials(mpan: String): Result<List<String>>
 
+    suspend fun fetchAccountNumbers(): Result<List<String>>
+
     suspend fun testConnection(): Result<Unit>
 
     suspend fun fetchFlexiblePrice(): Result<Double>
+
+    /**
+     * List import electricity products currently on sale, from the public
+     * (unauthenticated) `GET /v1/products/` endpoint. Used by the "More…"
+     * tariff picker on the Tariff Comparison screen.
+     */
+    suspend fun fetchAvailableTariffs(): Result<List<TariffOption>>
+
+    /**
+     * Unit rates for an arbitrary product + tariff over [start]..[end], from
+     * the public (unauthenticated) rates endpoint. No caching — used for the
+     * selected (comparison) tariff. Overlapping payment-method variants are
+     * collapsed preferring DIRECT_DEBIT.
+     */
+    suspend fun fetchTariffRates(
+        productCode: String,
+        tariffCode: String,
+        start: Instant,
+        end: Instant
+    ): Result<List<AgilePrice>>
+
+    /**
+     * Standing charges for an arbitrary product + tariff over [start]..[end],
+     * from the public (unauthenticated) endpoint. No caching.
+     */
+    suspend fun fetchTariffStandingCharges(
+        productCode: String,
+        tariffCode: String,
+        start: Instant,
+        end: Instant
+    ): Result<List<StandingCharge>>
 }
