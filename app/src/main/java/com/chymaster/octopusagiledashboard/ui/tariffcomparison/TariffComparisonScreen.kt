@@ -19,8 +19,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -30,6 +32,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
@@ -49,6 +52,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.chymaster.octopusagiledashboard.domain.model.CustomDateRange
@@ -194,10 +198,12 @@ fun TariffComparisonScreen(
                                         selected = savingPerspective == perspective
                                     ) {
                                         Text(
-                                            when (perspective) {
+                                            text = when (perspective) {
                                                 SavingPerspective.HOW_MUCH_WILL_I_SAVE -> "How much will I save"
                                                 SavingPerspective.WHAT_I_AM_SAVING -> "What I am saving"
-                                            }
+                                            },
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
                                         )
                                     }
                                 }
@@ -226,10 +232,12 @@ fun TariffComparisonScreen(
                                         selected = chartGroup == group
                                     ) {
                                         Text(
-                                            when (group) {
+                                            text = when (group) {
                                                 SavingsGraph.OVER_TIME -> "Savings over time"
                                                 SavingsGraph.BY_HOUR -> "24h breakdown"
-                                            }
+                                            },
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
                                         )
                                     }
                                 }
@@ -262,6 +270,7 @@ fun TariffComparisonScreen(
     if (uiState.showTariffPicker) {
         TariffPickerSheet(
             availableTariffs = uiState.availableTariffs,
+            historicalTariffs = uiState.historicalTariffs,
             isLoading = uiState.isProductsLoading,
             error = uiState.productsError,
             selectedId = uiState.selectedTariff.id,
@@ -421,11 +430,12 @@ private fun SavingsChart(
     }
 }
 
-/** "More…" bottom sheet listing all import products from the public API. */
+/** "More…" bottom sheet listing current + historical import products, with search. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun TariffPickerSheet(
     availableTariffs: List<TariffOption>,
+    historicalTariffs: List<TariffOption>,
     isLoading: Boolean,
     error: String?,
     selectedId: String,
@@ -433,6 +443,11 @@ private fun TariffPickerSheet(
     onRetry: () -> Unit,
     onDismiss: () -> Unit
 ) {
+    var query by rememberSaveable { mutableStateOf("") }
+    val current = availableTariffs.filter { matchesQuery(it, query) }
+    val historical = historicalTariffs.filter { matchesQuery(it, query) }
+    val hasResults = current.isNotEmpty() || historical.isNotEmpty()
+
     ModalBottomSheet(onDismissRequest = onDismiss) {
         when {
             isLoading -> {
@@ -469,45 +484,118 @@ private fun TariffPickerSheet(
                     }
                 }
             }
-            availableTariffs.isEmpty() -> {
-                Text(
-                    text = "No tariffs available",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(24.dp)
-                )
-            }
             else -> {
-                LazyColumn(modifier = Modifier.fillMaxWidth()) {
-                    items(availableTariffs, key = { it.id }) { option ->
-                        ListItem(
-                            headlineContent = {
-                                Text(option.displayName, fontWeight = FontWeight.Medium)
-                            },
-                            supportingContent = {
-                                Text(
-                                    text = option.id,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            },
-                            leadingContent = {
-                                if (option.id == selectedId) {
-                                    Icon(
-                                        Icons.Default.Check,
-                                        contentDescription = "Selected",
-                                        tint = MaterialTheme.colorScheme.primary
-                                    )
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    OutlinedTextField(
+                        value = query,
+                        onValueChange = { query = it },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        placeholder = { Text("Search tariffs…") },
+                        leadingIcon = {
+                            Icon(Icons.Default.Search, contentDescription = "Search")
+                        },
+                        trailingIcon = {
+                            if (query.isNotEmpty()) {
+                                IconButton(onClick = { query = "" }) {
+                                    Icon(Icons.Default.Close, contentDescription = "Clear search")
                                 }
+                            }
+                        },
+                        singleLine = true
+                    )
+                    if (!hasResults) {
+                        Text(
+                            text = if (query.isBlank()) {
+                                "No tariffs available"
+                            } else {
+                                "No matching tariffs"
                             },
-                            modifier = Modifier.clickable { onSelect(option) }
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(24.dp)
                         )
+                    } else {
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f, fill = false)
+                        ) {
+                            if (current.isNotEmpty()) {
+                                item(key = "current-header") {
+                                    PickerSectionHeader("Currently available")
+                                }
+                                items(current, key = { it.id }) { option ->
+                                    TariffPickerRow(option, selectedId, onSelect)
+                                }
+                            }
+                            if (historical.isNotEmpty()) {
+                                item(key = "historical-header") {
+                                    PickerSectionHeader("Historical (no longer on sale)")
+                                }
+                                items(historical, key = { it.id }) { option ->
+                                    TariffPickerRow(option, selectedId, onSelect)
+                                }
+                            }
+                        }
                     }
                 }
             }
         }
         Spacer(modifier = Modifier.height(24.dp))
     }
+}
+
+/** Section header inside the tariff picker. */
+@Composable
+private fun PickerSectionHeader(title: String) {
+    Text(
+        text = title,
+        style = MaterialTheme.typography.labelMedium,
+        fontWeight = FontWeight.SemiBold,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 4.dp)
+    )
+}
+
+/** One tappable tariff row in the picker. */
+@Composable
+private fun TariffPickerRow(
+    option: TariffOption,
+    selectedId: String,
+    onSelect: (TariffOption) -> Unit
+) {
+    ListItem(
+        headlineContent = {
+            Text(option.displayName, fontWeight = FontWeight.Medium)
+        },
+        supportingContent = {
+            Text(
+                text = option.id,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        },
+        leadingContent = {
+            if (option.id == selectedId) {
+                Icon(
+                    Icons.Default.Check,
+                    contentDescription = "Selected",
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            }
+        },
+        modifier = Modifier.clickable { onSelect(option) }
+    )
+}
+
+/** Search predicate: matches display name or product code, case-insensitive. */
+private fun matchesQuery(option: TariffOption, query: String): Boolean {
+    if (query.isBlank()) return true
+    val q = query.trim()
+    return option.displayName.contains(q, ignoreCase = true) ||
+        option.id.contains(q, ignoreCase = true)
 }
 
 private enum class SavingsGraph { OVER_TIME, BY_HOUR }

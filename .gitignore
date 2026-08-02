@@ -15,5 +15,8 @@ screenshot_*.png
 # Signing keystore
 *.jks
 
+# Play Developer API service account key
+play-service-account.json
+
 # Release builds
 /releases/

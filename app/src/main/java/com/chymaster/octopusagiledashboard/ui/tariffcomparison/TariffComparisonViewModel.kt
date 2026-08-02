@@ -32,6 +32,7 @@ data class TariffComparisonUiState(
     // "More…" product picker
     val showTariffPicker: Boolean = false,
     val availableTariffs: List<TariffOption> = emptyList(),
+    val historicalTariffs: List<TariffOption> = Constants.HISTORICAL_TARIFFS,
     val isProductsLoading: Boolean = false,
     val productsError: String? = null,
     val error: String? = null
