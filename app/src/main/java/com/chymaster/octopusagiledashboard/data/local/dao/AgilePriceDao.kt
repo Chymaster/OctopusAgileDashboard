@@ -20,6 +20,15 @@ interface AgilePriceDao {
     @Query("DELETE FROM agile_prices WHERE validFrom >= :startMillis AND validTo <= :endMillis")
     suspend fun deleteRange(startMillis: Long, endMillis: Long)
 
+    /**
+     * Delete rows in the range that are not on the canonical half-hour grid
+     * (validFrom not aligned to :00/:30). Used to purge time-shifted rows left
+     * behind by older demo-data versions; real Octopus API rates are always
+     * grid-aligned, so this never touches them.
+     */
+    @Query("DELETE FROM agile_prices WHERE validFrom >= :startMillis AND validTo <= :endMillis AND validFrom % 1800000 != 0")
+    suspend fun deleteNonCanonicalInRange(startMillis: Long, endMillis: Long)
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(items: List<AgilePriceEntity>)
 
