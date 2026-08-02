@@ -211,8 +211,19 @@ fun TariffComparisonScreen(
 
                             ComparisonStatRow(
                                 comparison = comparison,
-                                saving = comparison.totalSaving?.times(savingSign)
+                                saving = comparison.totalSaving?.times(savingSign),
+                                onTotalSavingClick = viewModel::onTogglePlanDetail,
+                                onUsageClick = viewModel::onTogglePlanDetail
                             )
+
+                            if (uiState.showPlanDetail) {
+                                PlanComparisonSheet(
+                                    visible = true,
+                                    comparison = comparison,
+                                    saving = comparison.totalSaving?.times(savingSign),
+                                    onDismiss = viewModel::onTogglePlanDetail
+                                )
+                            }
 
                             Spacer(modifier = Modifier.height(12.dp))
 
@@ -281,11 +292,13 @@ fun TariffComparisonScreen(
     }
 }
 
-/** Three stat boxes: current plan cost, selected plan cost, total saving. */
+/** Two stat boxes: total saving and total usage, both opening the plan detail sheet. */
 @Composable
 private fun ComparisonStatRow(
     comparison: TariffComparison,
-    saving: Double?
+    saving: Double?,
+    onTotalSavingClick: () -> Unit,
+    onUsageClick: () -> Unit
 ) {
     Row(
         modifier = Modifier
@@ -294,24 +307,23 @@ private fun ComparisonStatRow(
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         StatCard(
-            title = "Current Plan",
-            value = comparison.totalCostCurrent?.let(::formatCost) ?: "–",
-            modifier = Modifier.weight(1f)
-        )
-        StatCard(
-            title = "Selected Plan",
-            value = comparison.totalCostSelected?.let(::formatCost) ?: "–",
-            modifier = Modifier.weight(1f)
-        )
-        StatCard(
             title = "Total Saving",
             value = saving?.let(::formatCost) ?: "–",
-            modifier = Modifier.weight(1f),
+            modifier = Modifier
+                .weight(1f)
+                .clickable(onClick = onTotalSavingClick),
             valueColor = if ((saving ?: 0.0) >= 0.0) {
                 PriceColors.Cheap
             } else {
                 MaterialTheme.colorScheme.error
             }
+        )
+        StatCard(
+            title = "Total Usage",
+            value = String.format(java.util.Locale.UK, "%.1f kWh", comparison.totalKwh),
+            modifier = Modifier
+                .weight(1f)
+                .clickable(onClick = onUsageClick)
         )
     }
     Text(

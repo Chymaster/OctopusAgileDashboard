@@ -29,6 +29,8 @@ data class TariffComparisonUiState(
     val selectedTariff: TariffOption = TariffOption(Constants.FLEXIBLE_PRODUCT_CODE, "Flexible Octopus"),
     val curatedTariffs: List<TariffOption> = Constants.COMMON_TARIFFS,
     val comparison: TariffComparison? = null,
+    // Plan comparison sheet (Total Saving / Total Usage tap)
+    val showPlanDetail: Boolean = false,
     // "More…" product picker
     val showTariffPicker: Boolean = false,
     val availableTariffs: List<TariffOption> = emptyList(),
@@ -109,8 +111,19 @@ class TariffComparisonViewModel @Inject constructor(
         _uiState.update { it.copy(selectedTariff = option, showTariffPicker = false) }
     }
 
+    fun onTogglePlanDetail() {
+        _uiState.update {
+            if (!it.showPlanDetail) {
+                // Opening — dismiss any other open popups.
+                it.copy(showPlanDetail = true, showTariffPicker = false)
+            } else {
+                it.copy(showPlanDetail = false)
+            }
+        }
+    }
+
     fun onMoreTariffsClick() {
-        _uiState.update { it.copy(showTariffPicker = true) }
+        _uiState.update { it.copy(showTariffPicker = true, showPlanDetail = false) }
         if (_uiState.value.availableTariffs.isEmpty() && !_uiState.value.isProductsLoading) {
             loadAvailableTariffs()
         }
