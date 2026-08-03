@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -52,6 +53,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -215,12 +217,36 @@ fun TariffComparisonScreen(
                                 }
                             }
 
-                            ComparisonStatRow(
-                                comparison = comparison,
-                                saving = comparison.totalSaving?.times(savingSign),
-                                onTotalSavingClick = viewModel::onTogglePlanDetail,
-                                onUsageClick = viewModel::onTogglePlanDetail
-                            )
+                            // The bar detail sheet floats over the value fields
+                            // (Dashboard DataPointDetailSheet-style) and never
+                            // changes layout size, so the chart below stays put.
+                            // zIndex keeps the sheet's overflow drawn above the chart-group
+                            // selector below (later Column children would otherwise cover it).
+                            Box(modifier = Modifier.fillMaxWidth().zIndex(1f)) {
+                                ComparisonStatRow(
+                                    comparison = comparison,
+                                    saving = comparison.totalSaving?.times(savingSign),
+                                    onTotalSavingClick = viewModel::onTogglePlanDetail,
+                                    onUsageClick = viewModel::onTogglePlanDetail
+                                )
+                                // matchParentSize: measured to the box, adds no height,
+                                // so the chart below stays put. wrapContentHeight(unbounded)
+                                // lets the sheet overflow the shorter stat row; align = Top
+                                // pins it to the row's top (the default centers the taller
+                                // overlay in the box, which would overlap the toggle).
+                                Box(modifier = Modifier.matchParentSize()) {
+                                    SavingsDetailSheet(
+                                        point = uiState.selectedPoint,
+                                        sign = savingSign,
+                                        showHourOnly = chartGroup == SavingsGraph.BY_HOUR,
+                                        onDismiss = { viewModel.onPointTapped(null) },
+                                        modifier = Modifier.wrapContentHeight(
+                                            align = Alignment.Top,
+                                            unbounded = true
+                                        )
+                                    )
+                                }
+                            }
 
                             if (uiState.showPlanDetail) {
                                 PlanComparisonSheet(
@@ -276,13 +302,6 @@ fun TariffComparisonScreen(
                                 )
                             }
 
-                            SavingsDetailSheet(
-                                point = uiState.selectedPoint,
-                                sign = savingSign,
-                                showHourOnly = chartGroup == SavingsGraph.BY_HOUR,
-                                onDismiss = { viewModel.onPointTapped(null) }
-                            )
-
                             SavingsChart(
                                 savingsPoints = comparison.savingsPoints,
                                 selectedRange = uiState.selectedRange,
@@ -319,39 +338,44 @@ private fun ComparisonStatRow(
     onTotalSavingClick: () -> Unit,
     onUsageClick: () -> Unit
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        StatCard(
-            title = "Total Saving",
-            value = saving?.let(::formatCost) ?: "–",
+    // Emit a single Column so the stat cards + comparing caption stack
+    // vertically even when the parent is the overlay Box (a Box lays out
+    // sibling children at TopStart, which would overlap them).
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
             modifier = Modifier
-                .weight(1f)
-                .clickable(onClick = onTotalSavingClick),
-            valueColor = if ((saving ?: 0.0) >= 0.0) {
-                PriceColors.Cheap
-            } else {
-                MaterialTheme.colorScheme.error
-            }
-        )
-        StatCard(
-            title = "Total Usage",
-            value = String.format(java.util.Locale.UK, "%.1f kWh", comparison.totalKwh),
-            modifier = Modifier
-                .weight(1f)
-                .clickable(onClick = onUsageClick)
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            StatCard(
+                title = "Total Saving",
+                value = saving?.let(::formatCost) ?: "–",
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable(onClick = onTotalSavingClick),
+                valueColor = if ((saving ?: 0.0) >= 0.0) {
+                    PriceColors.Cheap
+                } else {
+                    MaterialTheme.colorScheme.error
+                }
+            )
+            StatCard(
+                title = "Total Usage",
+                value = String.format(java.util.Locale.UK, "%.1f kWh", comparison.totalKwh),
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable(onClick = onUsageClick)
+            )
+        }
+        Text(
+            text = "Comparing ${comparison.currentTariffName} vs ${comparison.selectedTariffName}" +
+                " · ${comparison.comparedSlotCount}/${comparison.totalSlotCount} slots compared",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
         )
     }
-    Text(
-        text = "Comparing ${comparison.currentTariffName} vs ${comparison.selectedTariffName}" +
-            " · ${comparison.comparedSlotCount}/${comparison.totalSlotCount} slots compared",
-        style = MaterialTheme.typography.labelSmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
-    )
 }
 
 /** Horizontally-scrollable quick-pick tariff chips + a "More…" chip. */

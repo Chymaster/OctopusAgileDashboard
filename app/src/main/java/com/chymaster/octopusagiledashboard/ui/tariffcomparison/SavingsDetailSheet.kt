@@ -39,9 +39,11 @@ fun SavingsDetailSheet(
     point: BinnedPoint?,
     sign: Double,
     showHourOnly: Boolean,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     AnimatedVisibility(
+        modifier = modifier,
         visible = point != null,
         enter = slideInVertically(initialOffsetY = { -it }),
         exit = slideOutVertically(targetOffsetY = { -it })
