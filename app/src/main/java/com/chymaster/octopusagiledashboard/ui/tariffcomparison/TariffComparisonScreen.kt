@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -102,6 +103,8 @@ fun TariffComparisonScreen(
     }
     // +1 keeps current − selected; −1 flips to selected − current.
     val savingSign = if (savingPerspective == SavingPerspective.WHAT_I_AM_SAVING) -1.0 else 1.0
+    // What the chart bars represent: total saving (£) or per-kWh unit saving/loss (p/kWh).
+    var barValue by rememberSaveable { mutableStateOf(BarValue.TOTAL_SAVING) }
 
     // Surface transient errors (e.g. while stale data is still shown) via snackbar.
     LaunchedEffect(uiState.error) {
@@ -307,6 +310,12 @@ fun TariffComparisonScreen(
                                 selectedRange = uiState.selectedRange,
                                 chartGroup = chartGroup,
                                 sign = savingSign,
+                                barValue = barValue,
+                                onBarValueChange = {
+                                    barValue = it
+                                    // Close any open bar detail when the bar meaning changes.
+                                    viewModel.onPointTapped(null)
+                                },
                                 onPointTapped = viewModel::onPointTapped
                             )
                         }
@@ -415,6 +424,8 @@ private fun SavingsChart(
     selectedRange: DateRangeSelection,
     chartGroup: SavingsGraph,
     sign: Double,
+    barValue: BarValue,
+    onBarValueChange: (BarValue) -> Unit,
     onPointTapped: (BinnedPoint?) -> Unit
 ) {
     // Same binning flags as the Dashboard: calendar-day for 7D, calendar-month
@@ -439,14 +450,23 @@ private fun SavingsChart(
     val graph2Binned = remember(savingsPoints) { binPointsByHourOfDay(savingsPoints) }
     val binned = if (chartGroup == SavingsGraph.OVER_TIME) graph1Binned else graph2Binned
 
-    val bars = remember(binned, sign) {
+    val bars = remember(binned, sign, barValue) {
         binned.map { bin ->
+            val value = when (barValue) {
+                // Total saving per bin, pence → £, sign-flipped to the perspective.
+                BarValue.TOTAL_SAVING -> (bin.totalCost ?: 0.0) / 100.0 * sign
+                // Average unit saving/loss per kWh (p/kWh): total saving ÷ usage.
+                BarValue.UNIT_PRICE -> {
+                    val usage = bin.totalConsumption ?: 0.0
+                    if (usage > 0.0) (bin.totalCost ?: 0.0) * sign / usage else 0.0
+                }
+            }
             ChartBar(
                 label = "",   // CanvasBarChart derives x-labels from intervalStart
-                value = (bin.totalCost ?: 0.0) / 100.0 * sign,   // pence → £
+                value = value,
                 intervalStart = bin.intervalStart,
                 intervalEnd = bin.intervalEnd,
-                unitLabel = "£"
+                unitLabel = if (barValue == BarValue.UNIT_PRICE) "p/kWh" else "£"
             )
         }
     }
@@ -482,6 +502,41 @@ private fun SavingsChart(
                 .padding(24.dp)
         )
     } else {
+        // Compact bar-value selector, right-aligned on the side of the chart.
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 2.dp),
+            horizontalArrangement = Arrangement.End
+        ) {
+            SingleChoiceSegmentedButtonRow {
+                BarValue.entries.forEachIndexed { index, value ->
+                    SegmentedButton(
+                        shape = SegmentedButtonDefaults.itemShape(
+                            index = index,
+                            count = BarValue.entries.size
+                        ),
+                        onClick = { onBarValueChange(value) },
+                        selected = barValue == value
+                    ) {
+                        Text(
+                            text = when (value) {
+                                BarValue.TOTAL_SAVING -> "Total saving"
+                                BarValue.UNIT_PRICE -> "Avg price"
+                            },
+                            // softWrap = false keeps the label at its natural single-line
+                            // width; widthIn(min) floors the segment's min-intrinsic width
+                            // so the IntrinsicSize.Min row's equal split can't squeeze the
+                            // longer "Total saving" label below its natural width (which
+                            // would clip the last letter).
+                            softWrap = false,
+                            modifier = Modifier.widthIn(min = 96.dp)
+                        )
+                    }
+                }
+            }
+        }
+
         // Legend: bar colours (saving/loss) + the usage line.
         Row(
             modifier = Modifier
@@ -686,6 +741,9 @@ private fun matchesQuery(option: TariffOption, query: String): Boolean {
 }
 
 private enum class SavingsGraph { OVER_TIME, BY_HOUR }
+
+/** What the chart bars represent: total saving (£) or per-kWh unit saving/loss (p/kWh). */
+private enum class BarValue { TOTAL_SAVING, UNIT_PRICE }
 
 /**
  * Which sign the "saving" numbers use. The use case computes
