@@ -443,10 +443,10 @@ private fun PriceRow(
  * Horizontal price bar anchored at 0p. Positive prices fill rightward, up to +100p
  * ending at [PRICE_BAR_SCREEN_FRACTION] of the screen width; negative prices extend
  * leftward from zero down to -20p. The zero point is shifted right of the time column
- * so negative bars never overlap it. A faint vertical line marks the left edge of the
- * bar area (where the time column ends) and a tick marks the 0p axis, framing the
- * negative-price strip. Only the coloured fill is drawn (no track). The price value
- * sits at the bar's right end and moves with the price.
+ * so negative bars never overlap it. A faint background band spans the bar area (from
+ * the time column edge to the +100p anchor) so the scale's start and stop read at a
+ * glance; only the coloured fill is drawn on top of it (no per-bar track). The price
+ * value sits at the bar's right end and moves with the price.
  */
 @Composable
 private fun PriceBar(
@@ -487,24 +487,16 @@ private fun PriceBar(
                 areaHeightDp = with(density) { size.height.toDp().value }
             }
     ) {
-        // Left boundary: faint vertical line where the time column ends and the bar
-        // area begins
+        // Faint background band for the bar area: spans from where the bar starts
+        // (time column edge) to where it stops (+100p anchor) so the scale's extent
+        // reads at a glance; the coloured fill draws on top of it
         Box(
             modifier = Modifier
                 .align(Alignment.CenterStart)
-                .width(1.dp)
+                .width(anchorDp.dp)
                 .height(areaHeightDp.dp)
-                .background(MaterialTheme.colorScheme.outlineVariant)
-        )
-        // Zero-axis tick: faint vertical line marking 0p, so the strip between the
-        // time column and zero reads as an intentional negative-price zone
-        Box(
-            modifier = Modifier
-                .align(Alignment.CenterStart)
-                .offset(x = zeroDp.dp)
-                .width(1.dp)
-                .height(areaHeightDp.dp)
-                .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
+                .clip(RoundedCornerShape(4.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant)
         )
         // Coloured fill, anchored at 0p (negative prices extend leftward)
         Box(
