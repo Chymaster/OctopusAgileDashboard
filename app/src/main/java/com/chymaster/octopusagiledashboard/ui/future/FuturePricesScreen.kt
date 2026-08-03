@@ -52,6 +52,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
@@ -398,17 +399,26 @@ private fun PriceRow(
                 .padding(horizontal = 12.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Time
-            Text(
-                text = zoned.format(timeFormatter),
-                style = MaterialTheme.typography.bodyMedium,
-                color = if (isPast) {
-                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
-                } else {
-                    MaterialTheme.colorScheme.onSurface
-                },
-                modifier = Modifier.width(50.dp)
-            )
+            // Time, as a chip: rounded surfaceVariant pill gives the time column a
+            // clear right edge, so the bar area visibly begins where the chip ends
+            Box(
+                modifier = Modifier
+                    .width(50.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = zoned.format(timeFormatter),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (isPast) {
+                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                    } else {
+                        MaterialTheme.colorScheme.onSurface
+                    }
+                )
+            }
 
             // Price bar + moving value (replaces the 4dp colour indicator + price text)
             PriceBar(
@@ -442,8 +452,9 @@ private fun PriceRow(
  * Horizontal price bar anchored at 0p. Positive prices fill rightward, up to +100p
  * ending at [PRICE_BAR_SCREEN_FRACTION] of the screen width; negative prices extend
  * leftward from zero down to -20p. The zero point is shifted right of the time column
- * so negative bars never overlap it. Only the coloured fill is drawn (no track).
- * The price value sits at the bar's right end and moves with the price.
+ * so negative bars never overlap it. A faint vertical tick marks the 0p axis. Only the
+ * coloured fill is drawn (no track). The price value sits at the bar's right end and
+ * moves with the price.
  */
 @Composable
 private fun PriceBar(
@@ -456,6 +467,7 @@ private fun PriceBar(
     val density = LocalDensity.current
     val screenWidthDp = LocalConfiguration.current.screenWidthDp.toFloat()
     var areaLeftDp by remember { mutableFloatStateOf(0f) }
+    var areaHeightDp by remember { mutableFloatStateOf(0f) }
 
     // Zero-centred scale: 0p anchors the bar, positive prices fill rightward up to
     // +100p (ending at PRICE_BAR_SCREEN_FRACTION of the screen), negative prices
@@ -479,7 +491,20 @@ private fun PriceBar(
             .onGloballyPositioned { coords ->
                 areaLeftDp = with(density) { coords.boundsInWindow().left.toDp().value }
             }
+            .onSizeChanged { size ->
+                areaHeightDp = with(density) { size.height.toDp().value }
+            }
     ) {
+        // Zero-axis tick: faint vertical line marking 0p, so the strip between the
+        // time chip and zero reads as an intentional negative-price zone
+        Box(
+            modifier = Modifier
+                .align(Alignment.CenterStart)
+                .offset(x = zeroDp.dp)
+                .width(1.dp)
+                .height(areaHeightDp.dp)
+                .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
+        )
         // Coloured fill, anchored at 0p (negative prices extend leftward)
         Box(
             modifier = Modifier
