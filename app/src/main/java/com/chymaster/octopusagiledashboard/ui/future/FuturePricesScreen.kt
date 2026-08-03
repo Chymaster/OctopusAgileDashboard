@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -72,10 +73,12 @@ private val londonZone = ZoneId.of("Europe/London")
 private val timeFormatter = DateTimeFormatter.ofPattern("HH:mm", Locale.UK)
 private val dateFormatter = DateTimeFormatter.ofPattern("dd MMM yyyy", Locale.UK)
 
-// Price-bar scale: the fill is linear from -20p (empty) to +100p (full)
+// Price-bar scale: 0p anchors the bar; positive prices fill rightward up to +100p
+// (ending at ~60% of screen width), negative prices extend leftward down to -20p.
 private const val PRICE_BAR_MIN_PENCE = -20.0
 private const val PRICE_BAR_MAX_PENCE = 100.0
-private const val PRICE_BAR_SCREEN_FRACTION = 0.60f // track right edge ≈ 60% of screen width
+private const val PRICE_BAR_SCREEN_FRACTION = 0.60f // +100p ends ≈ 60% of screen width
+private const val PRICE_BAR_ZERO_GAP_DP = 12f // clearance before the -20p extent (keeps it off the time column)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -436,12 +439,11 @@ private fun PriceRow(
 }
 
 /**
- * Horizontal price bar scaled from -20p (empty) to +100p (full).
- *
- * Only the coloured fill is drawn (no track); its scale is anchored so a full bar
- * would end at [PRICE_BAR_SCREEN_FRACTION] of the screen width (starting just after
- * the time column). The price value rides the tip of the coloured fill, moving with
- * the price instead of sitting in a fixed column.
+ * Horizontal price bar anchored at 0p. Positive prices fill rightward, up to +100p
+ * ending at [PRICE_BAR_SCREEN_FRACTION] of the screen width; negative prices extend
+ * leftward from zero down to -20p. The zero point is shifted right of the time column
+ * so negative bars never overlap it. Only the coloured fill is drawn (no track).
+ * The price value sits at the bar's right end and moves with the price.
  */
 @Composable
 private fun PriceBar(
@@ -455,14 +457,22 @@ private fun PriceBar(
     val screenWidthDp = LocalConfiguration.current.screenWidthDp.toFloat()
     var areaLeftDp by remember { mutableFloatStateOf(0f) }
 
-    val fillFraction = ((pricePence - PRICE_BAR_MIN_PENCE) /
-        (PRICE_BAR_MAX_PENCE - PRICE_BAR_MIN_PENCE)).toFloat().coerceIn(0f, 1f)
+    // Zero-centred scale: 0p anchors the bar, positive prices fill rightward up to
+    // +100p (ending at PRICE_BAR_SCREEN_FRACTION of the screen), negative prices
+    // extend leftward down to -20p. The zero point is shifted right of the time
+    // column so negative bars never overlap it. The +100p anchor is made exact by
+    // subtracting this area's on-screen left offset (measured once).
+    val anchorDp = (screenWidthDp * PRICE_BAR_SCREEN_FRACTION - areaLeftDp)
+        .coerceAtLeast(64f)
+    val dpPerPence = (anchorDp - PRICE_BAR_ZERO_GAP_DP) /
+        (PRICE_BAR_MAX_PENCE - PRICE_BAR_MIN_PENCE)
+    val zeroDp = PRICE_BAR_ZERO_GAP_DP + (-PRICE_BAR_MIN_PENCE) * dpPerPence
 
-    // Track ends at PRICE_BAR_SCREEN_FRACTION of the screen: subtract this area's
-    // left offset (measured once) so the 60% anchor is exact regardless of padding.
-    val trackWidthDp = (screenWidthDp * PRICE_BAR_SCREEN_FRACTION - areaLeftDp)
-        .coerceAtLeast(48f)
-    val tipOffsetDp = trackWidthDp * fillFraction
+    val clampedPence = pricePence.toFloat()
+        .coerceIn(PRICE_BAR_MIN_PENCE.toFloat(), PRICE_BAR_MAX_PENCE.toFloat())
+    val fillStartDp = zeroDp + kotlin.math.min(clampedPence, 0f) * dpPerPence
+    val fillWidthDp = kotlin.math.abs(clampedPence) * dpPerPence
+    val labelDp = zeroDp + kotlin.math.max(clampedPence, 0f) * dpPerPence
 
     Box(
         modifier = modifier
@@ -470,16 +480,18 @@ private fun PriceBar(
                 areaLeftDp = with(density) { coords.boundsInWindow().left.toDp().value }
             }
     ) {
-        // Coloured fill (the unfilled portion of the scale is invisible)
+        // Coloured fill, anchored at 0p (negative prices extend leftward)
         Box(
             modifier = Modifier
                 .align(Alignment.CenterStart)
-                .width(tipOffsetDp.dp)
+                .offset(x = fillStartDp.dp)
+                .width(fillWidthDp.dp)
                 .height(8.dp)
                 .clip(RoundedCornerShape(4.dp))
                 .background(fillColor)
         )
-        // Price value riding the fill tip (clamped so it never clips off-screen/under NOW)
+        // Price value at the bar's right end (the tip for positive prices, zero for
+        // negatives), clamped so it never clips off-screen/under NOW
         Text(
             text = String.format(Locale.UK, "%.1f p/kWh", pricePence),
             style = MaterialTheme.typography.bodyLarge,
@@ -491,7 +503,7 @@ private fun PriceBar(
             },
             modifier = Modifier.layout { measurable, constraints ->
                 val placeable = measurable.measure(constraints)
-                val rawX = (tipOffsetDp + 6f).dp.roundToPx()
+                val rawX = (labelDp + 6f).dp.roundToPx()
                 val maxX = (constraints.maxWidth - placeable.width).coerceAtLeast(0)
                 layout(placeable.width, placeable.height) {
                     placeable.place(rawX.coerceAtMost(maxX), 0)
