@@ -10,6 +10,7 @@ import com.chymaster.octopusagiledashboard.domain.model.TariffOption
 import com.chymaster.octopusagiledashboard.domain.model.TimeRangePreset
 import com.chymaster.octopusagiledashboard.domain.model.toUserMessage
 import com.chymaster.octopusagiledashboard.domain.usecase.GetTariffComparisonUseCase
+import com.chymaster.octopusagiledashboard.ui.chart.BinnedPoint
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -31,6 +32,8 @@ data class TariffComparisonUiState(
     val comparison: TariffComparison? = null,
     // Plan comparison sheet (Total Saving / Total Usage tap)
     val showPlanDetail: Boolean = false,
+    // Savings chart bar detail sheet
+    val selectedPoint: BinnedPoint? = null,
     // "More…" product picker
     val showTariffPicker: Boolean = false,
     val availableTariffs: List<TariffOption> = emptyList(),
@@ -73,7 +76,8 @@ class TariffComparisonViewModel @Inject constructor(
                             isRefreshing = false,
                             selectedRange = range,
                             selectedTariff = tariff,
-                            error = null
+                            error = null,
+                            selectedPoint = null
                         )
                     }
                     getTariffComparisonUseCase(range, tariff.id, tariff.displayName)
@@ -115,15 +119,26 @@ class TariffComparisonViewModel @Inject constructor(
         _uiState.update {
             if (!it.showPlanDetail) {
                 // Opening — dismiss any other open popups.
-                it.copy(showPlanDetail = true, showTariffPicker = false)
+                it.copy(showPlanDetail = true, showTariffPicker = false, selectedPoint = null)
             } else {
                 it.copy(showPlanDetail = false)
             }
         }
     }
 
+    /** Selects a tapped savings-chart bar (Dashboard-style), dismissing other popups. */
+    fun onPointTapped(point: BinnedPoint?) {
+        _uiState.update {
+            if (point != null) {
+                it.copy(selectedPoint = point, showPlanDetail = false, showTariffPicker = false)
+            } else {
+                it.copy(selectedPoint = null)
+            }
+        }
+    }
+
     fun onMoreTariffsClick() {
-        _uiState.update { it.copy(showTariffPicker = true, showPlanDetail = false) }
+        _uiState.update { it.copy(showTariffPicker = true, showPlanDetail = false, selectedPoint = null) }
         if (_uiState.value.availableTariffs.isEmpty() && !_uiState.value.isProductsLoading) {
             loadAvailableTariffs()
         }

@@ -62,6 +62,7 @@ import com.chymaster.octopusagiledashboard.domain.model.HalfHourPoint
 import com.chymaster.octopusagiledashboard.domain.model.TariffComparison
 import com.chymaster.octopusagiledashboard.domain.model.TariffOption
 import com.chymaster.octopusagiledashboard.domain.model.TimeRangePreset
+import com.chymaster.octopusagiledashboard.ui.chart.BinnedPoint
 import com.chymaster.octopusagiledashboard.ui.chart.CanvasBarChart
 import com.chymaster.octopusagiledashboard.ui.chart.ChartBar
 import com.chymaster.octopusagiledashboard.ui.chart.ChartColors
@@ -244,7 +245,12 @@ fun TariffComparisonScreen(
                                             index = index,
                                             count = SavingsGraph.entries.size
                                         ),
-                                        onClick = { chartGroup = group },
+                                        onClick = {
+                                            chartGroup = group
+                                            // Close any open bar detail so it never
+                                            // shows one graph's bin under the other's header.
+                                            viewModel.onPointTapped(null)
+                                        },
                                         selected = chartGroup == group
                                     ) {
                                         Text(
@@ -270,11 +276,19 @@ fun TariffComparisonScreen(
                                 )
                             }
 
+                            SavingsDetailSheet(
+                                point = uiState.selectedPoint,
+                                sign = savingSign,
+                                showHourOnly = chartGroup == SavingsGraph.BY_HOUR,
+                                onDismiss = { viewModel.onPointTapped(null) }
+                            )
+
                             SavingsChart(
                                 savingsPoints = comparison.savingsPoints,
                                 selectedRange = uiState.selectedRange,
                                 chartGroup = chartGroup,
-                                sign = savingSign
+                                sign = savingSign,
+                                onPointTapped = viewModel::onPointTapped
                             )
                         }
                     }
@@ -376,7 +390,8 @@ private fun SavingsChart(
     savingsPoints: List<HalfHourPoint>,
     selectedRange: DateRangeSelection,
     chartGroup: SavingsGraph,
-    sign: Double
+    sign: Double,
+    onPointTapped: (BinnedPoint?) -> Unit
 ) {
     // Same binning flags as the Dashboard: calendar-day for 7D, calendar-month
     // for 6M/1Y, auto ≤20 bars otherwise.
@@ -465,6 +480,7 @@ private fun SavingsChart(
             // 24-bar hour-of-day view bins into fixed hourly slots, so it
             // renders fit-mode with thinner bars rather than scrolling.
             isScrollable = false,
+            onBarTapped = { idx -> onPointTapped(binned.getOrNull(idx)) },
             usageValues = usageValues,
             usageYMin = usageYMin,
             usageYMax = usageYMax,
