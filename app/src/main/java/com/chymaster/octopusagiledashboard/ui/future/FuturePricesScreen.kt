@@ -5,7 +5,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -73,7 +72,7 @@ private val dateFormatter = DateTimeFormatter.ofPattern("dd MMM yyyy", Locale.UK
 
 // Price-bar scale: the fill is left-anchored and its length is proportional to price
 // on the -20p..+100p scale, reaching [PRICE_BAR_SCREEN_FRACTION] of the screen width
-// at +100p (also the right edge of the tinted bar zone).
+// at +100p.
 private const val PRICE_BAR_MIN_PENCE = -20.0
 private const val PRICE_BAR_MAX_PENCE = 100.0
 private const val PRICE_BAR_SCREEN_FRACTION = 0.60f // +100p ends ≈ 60% of screen width
@@ -225,23 +224,11 @@ fun FuturePricesScreen(
                 )
             }
             else -> {
-                // Split-screen background: a tinted left band marks the bar zone (up to
-                // the +100p scale end at ~60% of screen width); the right side stays the
-                // plain surface. Both tokens stay distinct in light and dark mode.
-                val barZoneWidthDp = LocalConfiguration.current.screenWidthDp *
-                    PRICE_BAR_SCREEN_FRACTION
                 Box(
                     modifier = modifier
                         .fillMaxSize()
                         .padding(paddingValues)
-                        .background(MaterialTheme.colorScheme.surface)
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxHeight()
-                            .width(barZoneWidthDp.dp)
-                            .background(MaterialTheme.colorScheme.surfaceVariant)
-                    )
                     LazyColumn(
                         state = listState,
                         modifier = Modifier.fillMaxSize(),
@@ -395,7 +382,7 @@ private fun PriceRow(
             .padding(horizontal = 8.dp, vertical = 1.dp)
             .then(
                 if (isCurrent) {
-                    // Current-slot highlight over the split background
+                    // Current-slot highlight
                     Modifier.background(
                         MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
                         RoundedCornerShape(4.dp)
@@ -454,8 +441,8 @@ private fun PriceRow(
 /**
  * Horizontal price bar whose coloured fill is left-anchored and proportional to price
  * on the -20p..+100p scale, reaching [PRICE_BAR_SCREEN_FRACTION] of the screen width at
- * +100p. The scale's extent is implied by the screen-level tinted bar zone rather than
- * a per-bar background. The price value rides the fill's right end and moves with it.
+ * +100p. No track or background is drawn — just the coloured fill. The price value
+ * rides the fill's right end and moves with it.
  */
 @Composable
 private fun PriceBar(
@@ -488,7 +475,7 @@ private fun PriceBar(
             }
     ) {
         // Coloured fill: left-anchored, length proportional to price on the -20p..+100p
-        // scale. The scale's extent is implied by the screen-level tinted bar zone.
+        // scale
         Box(
             modifier = Modifier
                 .align(Alignment.CenterStart)
