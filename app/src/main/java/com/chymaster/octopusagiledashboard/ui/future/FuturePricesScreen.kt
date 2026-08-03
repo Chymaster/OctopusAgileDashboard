@@ -438,9 +438,10 @@ private fun PriceRow(
 /**
  * Horizontal price bar scaled from -20p (empty) to +100p (full).
  *
- * The track ends at [PRICE_BAR_SCREEN_FRACTION] of the screen width (starting just
- * after the time column), leaving a right margin. The price value rides the tip of
- * the coloured fill, moving with the price instead of sitting in a fixed column.
+ * Only the coloured fill is drawn (no track); its scale is anchored so a full bar
+ * would end at [PRICE_BAR_SCREEN_FRACTION] of the screen width (starting just after
+ * the time column). The price value rides the tip of the coloured fill, moving with
+ * the price instead of sitting in a fixed column.
  */
 @Composable
 private fun PriceBar(
@@ -469,15 +470,7 @@ private fun PriceBar(
                 areaLeftDp = with(density) { coords.boundsInWindow().left.toDp().value }
             }
     ) {
-        // Full-scale track (-20p .. +100p)
-        Box(
-            modifier = Modifier
-                .align(Alignment.CenterStart)
-                .width(trackWidthDp.dp)
-                .height(8.dp)
-                .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(4.dp))
-        )
-        // Coloured fill
+        // Coloured fill (the unfilled portion of the scale is invisible)
         Box(
             modifier = Modifier
                 .align(Alignment.CenterStart)
