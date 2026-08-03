@@ -460,7 +460,7 @@ private fun SavingsChart(
                 // Total saving per bin, pence → £, sign-flipped to the perspective.
                 BarValue.TOTAL_SAVING -> (bin.totalCost ?: 0.0) / 100.0 * sign
                 // Average unit saving/loss per kWh (p/kWh): total saving ÷ usage.
-                BarValue.UNIT_PRICE -> {
+                BarValue.UNIT_SAVING -> {
                     val usage = bin.totalConsumption ?: 0.0
                     if (usage > 0.0) (bin.totalCost ?: 0.0) * sign / usage else 0.0
                 }
@@ -470,7 +470,7 @@ private fun SavingsChart(
                 value = value,
                 intervalStart = bin.intervalStart,
                 intervalEnd = bin.intervalEnd,
-                unitLabel = if (barValue == BarValue.UNIT_PRICE) "p/kWh" else "£"
+                unitLabel = if (barValue == BarValue.UNIT_SAVING) "p/kWh" else "£"
             )
         }
     }
@@ -508,7 +508,7 @@ private fun SavingsChart(
     } else {
         // Legend: bar colours (saving/loss) + the usage line, with the compact
         // bar-value selector (a bar-chart icon that pops up the choice between
-        // total saving and average unit price) on the right.
+        // total saving and average unit saving) on the right.
         var barMenuExpanded by remember { mutableStateOf(false) }
         Row(
             modifier = Modifier
@@ -545,7 +545,7 @@ private fun SavingsChart(
                                 Text(
                                     text = when (value) {
                                         BarValue.TOTAL_SAVING -> "Total saving"
-                                        BarValue.UNIT_PRICE -> "Average unit price"
+                                        BarValue.UNIT_SAVING -> "Average unit saving"
                                     }
                                 )
                             },
@@ -760,7 +760,7 @@ private fun matchesQuery(option: TariffOption, query: String): Boolean {
 private enum class SavingsGraph { OVER_TIME, BY_HOUR }
 
 /** What the chart bars represent: total saving (£) or per-kWh unit saving/loss (p/kWh). */
-private enum class BarValue { TOTAL_SAVING, UNIT_PRICE }
+private enum class BarValue { TOTAL_SAVING, UNIT_SAVING }
 
 /**
  * Which sign the "saving" numbers use. The use case computes
