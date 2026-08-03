@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -63,6 +64,10 @@ import com.chymaster.octopusagiledashboard.domain.model.TariffOption
 import com.chymaster.octopusagiledashboard.domain.model.TimeRangePreset
 import com.chymaster.octopusagiledashboard.ui.chart.CanvasBarChart
 import com.chymaster.octopusagiledashboard.ui.chart.ChartBar
+import com.chymaster.octopusagiledashboard.ui.chart.ChartColors
+import com.chymaster.octopusagiledashboard.ui.chart.LegendShape
+import com.chymaster.octopusagiledashboard.ui.chart.LegendSwatch
+import com.chymaster.octopusagiledashboard.ui.chart.alignUsageZeroMin
 import com.chymaster.octopusagiledashboard.ui.chart.binPoints
 import com.chymaster.octopusagiledashboard.ui.chart.binPointsByCalendarDay
 import com.chymaster.octopusagiledashboard.ui.chart.binPointsByCalendarMonth
@@ -415,6 +420,18 @@ private fun SavingsChart(
         val min = bars.minOfOrNull { it.value } ?: 0.0
         if (min < 0.0) min * 1.1 else 0.0
     }
+    // Usage kWh series for the right-axis overlay line. Usage is independent
+    // of the saving-perspective sign, so it is never multiplied by `sign`.
+    val usageValues = remember(binned) { binned.map { it.totalConsumption ?: 0.0 } }
+    val usageYMax = remember(usageValues) { maxOf(usageValues.maxOrNull() ?: 0.0, 1.0) * 1.1 }
+    // Where the savings zero sits on the left axis (0 = bottom, 1 = top). When
+    // savings can be negative this is mid-chart, and the usage axis must extend
+    // below zero (an unused region, since usage is always >= 0) so its zero lands
+    // on the same line — giving both scales a single shared baseline.
+    val zeroFraction = remember(yMin, yMax) {
+        if (yMax != yMin) ((0.0 - yMin) / (yMax - yMin)).coerceIn(0.0, 1.0) else 0.0
+    }
+    val usageYMin = remember(usageYMax, zeroFraction) { alignUsageZeroMin(zeroFraction, usageYMax) }
 
     if (bars.isEmpty()) {
         Text(
@@ -426,6 +443,19 @@ private fun SavingsChart(
                 .padding(24.dp)
         )
     } else {
+        // Legend: bar colours (saving/loss) + the usage line.
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            LegendSwatch(PriceColors.Cheap, "Saving", LegendShape.Square)
+            Spacer(Modifier.width(10.dp))
+            LegendSwatch(PriceColors.Expensive, "Loss", LegendShape.Square)
+            Spacer(Modifier.width(10.dp))
+            LegendSwatch(ChartColors.ConsumptionLine, "Usage", LegendShape.Circle)
+        }
         CanvasBarChart(
             bars = bars,
             barColors = barColors,
@@ -435,6 +465,11 @@ private fun SavingsChart(
             // 24-bar hour-of-day view bins into fixed hourly slots, so it
             // renders fit-mode with thinner bars rather than scrolling.
             isScrollable = false,
+            usageValues = usageValues,
+            usageYMin = usageYMin,
+            usageYMax = usageYMax,
+            usageLineColor = ChartColors.ConsumptionLine,
+            usageUnitLabel = "kWh",
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 8.dp)
