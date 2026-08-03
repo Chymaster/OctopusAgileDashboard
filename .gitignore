@@ -18,5 +18,11 @@ screenshot_*.png
 # Play Developer API service account key
 play-service-account.json
 
+# Environment / credentials files (API keys, tokens)
+.env
+.env.*
+*.env
+!.env.example
+
 # Release builds
 /releases/
