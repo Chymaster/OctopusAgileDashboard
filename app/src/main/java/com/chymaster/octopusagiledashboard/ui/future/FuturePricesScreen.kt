@@ -37,6 +37,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -46,6 +47,12 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -64,6 +71,11 @@ import java.util.SortedMap
 private val londonZone = ZoneId.of("Europe/London")
 private val timeFormatter = DateTimeFormatter.ofPattern("HH:mm", Locale.UK)
 private val dateFormatter = DateTimeFormatter.ofPattern("dd MMM yyyy", Locale.UK)
+
+// Price-bar scale: the fill is linear from -20p (empty) to +100p (full)
+private const val PRICE_BAR_MIN_PENCE = -20.0
+private const val PRICE_BAR_MAX_PENCE = 100.0
+private const val PRICE_BAR_SCREEN_FRACTION = 0.60f // track right edge ≈ 60% of screen width
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -395,27 +407,12 @@ private fun PriceRow(
                 modifier = Modifier.width(50.dp)
             )
 
-            // Price color indicator
-            Box(
-                modifier = Modifier
-                    .width(4.dp)
-                    .height(24.dp)
-                    .clip(RoundedCornerShape(2.dp))
-                    .background(color)
-            )
-
-            Spacer(modifier = Modifier.width(12.dp))
-
-            // Price value
-            Text(
-                text = String.format(Locale.UK, "%.1f p/kWh", price.priceIncVat),
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal,
-                color = if (isPast) {
-                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
-                } else {
-                    color
-                },
+            // Price bar + moving value (replaces the 4dp colour indicator + price text)
+            PriceBar(
+                pricePence = price.priceIncVat,
+                fillColor = color,
+                isPast = isPast,
+                isCurrent = isCurrent,
                 modifier = Modifier.weight(1f)
             )
 
@@ -435,5 +432,78 @@ private fun PriceRow(
                 )
             }
         }
+    }
+}
+
+/**
+ * Horizontal price bar scaled from -20p (empty) to +100p (full).
+ *
+ * The track ends at [PRICE_BAR_SCREEN_FRACTION] of the screen width (starting just
+ * after the time column), leaving a right margin. The price value rides the tip of
+ * the coloured fill, moving with the price instead of sitting in a fixed column.
+ */
+@Composable
+private fun PriceBar(
+    pricePence: Double,
+    fillColor: Color,
+    isPast: Boolean,
+    isCurrent: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val density = LocalDensity.current
+    val screenWidthDp = LocalConfiguration.current.screenWidthDp.toFloat()
+    var areaLeftDp by remember { mutableFloatStateOf(0f) }
+
+    val fillFraction = ((pricePence - PRICE_BAR_MIN_PENCE) /
+        (PRICE_BAR_MAX_PENCE - PRICE_BAR_MIN_PENCE)).toFloat().coerceIn(0f, 1f)
+
+    // Track ends at PRICE_BAR_SCREEN_FRACTION of the screen: subtract this area's
+    // left offset (measured once) so the 60% anchor is exact regardless of padding.
+    val trackWidthDp = (screenWidthDp * PRICE_BAR_SCREEN_FRACTION - areaLeftDp)
+        .coerceAtLeast(48f)
+    val tipOffsetDp = trackWidthDp * fillFraction
+
+    Box(
+        modifier = modifier
+            .onGloballyPositioned { coords ->
+                areaLeftDp = with(density) { coords.boundsInWindow().left.toDp().value }
+            }
+    ) {
+        // Full-scale track (-20p .. +100p)
+        Box(
+            modifier = Modifier
+                .align(Alignment.CenterStart)
+                .width(trackWidthDp.dp)
+                .height(8.dp)
+                .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(4.dp))
+        )
+        // Coloured fill
+        Box(
+            modifier = Modifier
+                .align(Alignment.CenterStart)
+                .width(tipOffsetDp.dp)
+                .height(8.dp)
+                .clip(RoundedCornerShape(4.dp))
+                .background(fillColor)
+        )
+        // Price value riding the fill tip (clamped so it never clips off-screen/under NOW)
+        Text(
+            text = String.format(Locale.UK, "%.1f p/kWh", pricePence),
+            style = MaterialTheme.typography.bodyLarge,
+            fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal,
+            color = if (isPast) {
+                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+            } else {
+                fillColor
+            },
+            modifier = Modifier.layout { measurable, constraints ->
+                val placeable = measurable.measure(constraints)
+                val rawX = (tipOffsetDp + 6f).dp.roundToPx()
+                val maxX = (constraints.maxWidth - placeable.width).coerceAtLeast(0)
+                layout(placeable.width, placeable.height) {
+                    placeable.place(rawX.coerceAtMost(maxX), 0)
+                }
+            }
+        )
     }
 }
