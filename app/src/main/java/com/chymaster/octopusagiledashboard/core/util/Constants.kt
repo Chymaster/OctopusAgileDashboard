@@ -19,7 +19,35 @@ object Constants {
         TariffOption(DEFAULT_PRODUCT_CODE, "Agile Octopus"),
         TariffOption("COSY-22-12-08", "Cosy Octopus"),
         TariffOption("GO-VAR-22-10-14", "Octopus Go"),
-        TariffOption("OE-FIX-12M-26-07-29", "12M Fixed"),
+        // Octopus Tracker is not on the current products catalogue; the SILVER
+        // family is its product code family, and SILVER-23-12-06 still serves
+        // live daily rates. Curated here so it stays a one-tap quick pick.
+        TariffOption("SILVER-23-12-06", "Octopus Tracker"),
+    )
+
+    /**
+     * Historical import tariffs no longer on sale but still queryable via the
+     * public rates API. The products catalogue endpoint only lists tariffs
+     * currently on sale — there is no endpoint that lists archived products —
+     * so this shortlist is curated from historical product snapshots and
+     * verified against the live API. Filtered to tariffs whose `available_to`
+     * is within the last year so their rate history is recent enough to
+     * compare over the app's ranges. Display names append the launch month to
+     * disambiguate the repeated official names (e.g. three "Octopus 12M Fixed"
+     * products).
+     */
+    val HISTORICAL_TARIFFS = listOf(
+        TariffOption("OE-FIX-12M-25-09-09", "Octopus 12M Fixed (Sep 2025)"),
+        TariffOption("OE-FIX-12M-25-11-25", "Octopus 12M Fixed (Nov 2025)"),
+        TariffOption("OE-FIX-12M-26-06-06", "Octopus 12M Fixed (Jun 2026)"),
+        TariffOption("COSY-FIX-12M-25-09-24", "Cosy Octopus 12M Fixed (Sep 2025)"),
+        TariffOption("COSY-FIX-12M-26-03-23", "Cosy Octopus 12M Fixed (Mar 2026)"),
+        TariffOption("GO-FIX-12M-25-08-29", "Octopus Go 12M Fixed (Aug 2025)"),
+        TariffOption("GO-FIX-12M-26-04-18", "Octopus Go 12M Fixed (Apr 2026)"),
+        TariffOption("INTELLI-FIX-12M-25-08-29", "Intelligent Octopus Go 12M Fixed (Aug 2025)"),
+        TariffOption("INTELLI-FIX-12M-26-04-18", "Intelligent Octopus Go 12M Fixed (Apr 2026)"),
+        TariffOption("INTELLI-VAR-24-10-29", "Intelligent Octopus Go"),
+        TariffOption("INTELLI-VAR-OEV-24-07-17", "Intelligent Octopus Go - EV Saver"),
     )
 
     // Default GSP region: _L = London (UK Power Networks)

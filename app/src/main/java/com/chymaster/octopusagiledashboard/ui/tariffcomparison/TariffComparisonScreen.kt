@@ -12,17 +12,25 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -30,6 +38,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
@@ -48,7 +57,10 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.chymaster.octopusagiledashboard.domain.model.CustomDateRange
@@ -57,8 +69,13 @@ import com.chymaster.octopusagiledashboard.domain.model.HalfHourPoint
 import com.chymaster.octopusagiledashboard.domain.model.TariffComparison
 import com.chymaster.octopusagiledashboard.domain.model.TariffOption
 import com.chymaster.octopusagiledashboard.domain.model.TimeRangePreset
+import com.chymaster.octopusagiledashboard.ui.chart.BinnedPoint
 import com.chymaster.octopusagiledashboard.ui.chart.CanvasBarChart
 import com.chymaster.octopusagiledashboard.ui.chart.ChartBar
+import com.chymaster.octopusagiledashboard.ui.chart.ChartColors
+import com.chymaster.octopusagiledashboard.ui.chart.LegendShape
+import com.chymaster.octopusagiledashboard.ui.chart.LegendSwatch
+import com.chymaster.octopusagiledashboard.ui.chart.alignUsageZeroMin
 import com.chymaster.octopusagiledashboard.ui.chart.binPoints
 import com.chymaster.octopusagiledashboard.ui.chart.binPointsByCalendarDay
 import com.chymaster.octopusagiledashboard.ui.chart.binPointsByCalendarMonth
@@ -90,6 +107,8 @@ fun TariffComparisonScreen(
     }
     // +1 keeps current − selected; −1 flips to selected − current.
     val savingSign = if (savingPerspective == SavingPerspective.WHAT_I_AM_SAVING) -1.0 else 1.0
+    // What the chart bars represent: total saving (£) or per-kWh unit saving/loss (p/kWh).
+    var barValue by rememberSaveable { mutableStateOf(BarValue.TOTAL_SAVING) }
 
     // Surface transient errors (e.g. while stale data is still shown) via snackbar.
     LaunchedEffect(uiState.error) {
@@ -194,19 +213,56 @@ fun TariffComparisonScreen(
                                         selected = savingPerspective == perspective
                                     ) {
                                         Text(
-                                            when (perspective) {
+                                            text = when (perspective) {
                                                 SavingPerspective.HOW_MUCH_WILL_I_SAVE -> "How much will I save"
                                                 SavingPerspective.WHAT_I_AM_SAVING -> "What I am saving"
-                                            }
+                                            },
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
                                         )
                                     }
                                 }
                             }
 
-                            ComparisonStatRow(
-                                comparison = comparison,
-                                saving = comparison.totalSaving?.times(savingSign)
-                            )
+                            // The bar detail sheet floats over the value fields
+                            // (Dashboard DataPointDetailSheet-style) and never
+                            // changes layout size, so the chart below stays put.
+                            // zIndex keeps the sheet's overflow drawn above the chart-group
+                            // selector below (later Column children would otherwise cover it).
+                            Box(modifier = Modifier.fillMaxWidth().zIndex(1f)) {
+                                ComparisonStatRow(
+                                    comparison = comparison,
+                                    saving = comparison.totalSaving?.times(savingSign),
+                                    onTotalSavingClick = viewModel::onTogglePlanDetail,
+                                    onUsageClick = viewModel::onTogglePlanDetail
+                                )
+                                // matchParentSize: measured to the box, adds no height,
+                                // so the chart below stays put. wrapContentHeight(unbounded)
+                                // lets the sheet overflow the shorter stat row; align = Top
+                                // pins it to the row's top (the default centers the taller
+                                // overlay in the box, which would overlap the toggle).
+                                Box(modifier = Modifier.matchParentSize()) {
+                                    SavingsDetailSheet(
+                                        point = uiState.selectedPoint,
+                                        sign = savingSign,
+                                        showHourOnly = chartGroup == SavingsGraph.BY_HOUR,
+                                        onDismiss = { viewModel.onPointTapped(null) },
+                                        modifier = Modifier.wrapContentHeight(
+                                            align = Alignment.Top,
+                                            unbounded = true
+                                        )
+                                    )
+                                }
+                            }
+
+                            if (uiState.showPlanDetail) {
+                                PlanComparisonSheet(
+                                    visible = true,
+                                    comparison = comparison,
+                                    saving = comparison.totalSaving?.times(savingSign),
+                                    onDismiss = viewModel::onTogglePlanDetail
+                                )
+                            }
 
                             Spacer(modifier = Modifier.height(12.dp))
 
@@ -222,14 +278,21 @@ fun TariffComparisonScreen(
                                             index = index,
                                             count = SavingsGraph.entries.size
                                         ),
-                                        onClick = { chartGroup = group },
+                                        onClick = {
+                                            chartGroup = group
+                                            // Close any open bar detail so it never
+                                            // shows one graph's bin under the other's header.
+                                            viewModel.onPointTapped(null)
+                                        },
                                         selected = chartGroup == group
                                     ) {
                                         Text(
-                                            when (group) {
+                                            text = when (group) {
                                                 SavingsGraph.OVER_TIME -> "Savings over time"
                                                 SavingsGraph.BY_HOUR -> "24h breakdown"
-                                            }
+                                            },
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
                                         )
                                     }
                                 }
@@ -250,7 +313,14 @@ fun TariffComparisonScreen(
                                 savingsPoints = comparison.savingsPoints,
                                 selectedRange = uiState.selectedRange,
                                 chartGroup = chartGroup,
-                                sign = savingSign
+                                sign = savingSign,
+                                barValue = barValue,
+                                onBarValueChange = {
+                                    barValue = it
+                                    // Close any open bar detail when the bar meaning changes.
+                                    viewModel.onPointTapped(null)
+                                },
+                                onPointTapped = viewModel::onPointTapped
                             )
                         }
                     }
@@ -262,6 +332,7 @@ fun TariffComparisonScreen(
     if (uiState.showTariffPicker) {
         TariffPickerSheet(
             availableTariffs = uiState.availableTariffs,
+            historicalTariffs = uiState.historicalTariffs,
             isLoading = uiState.isProductsLoading,
             error = uiState.productsError,
             selectedId = uiState.selectedTariff.id,
@@ -272,46 +343,52 @@ fun TariffComparisonScreen(
     }
 }
 
-/** Three stat boxes: current plan cost, selected plan cost, total saving. */
+/** Two stat boxes: total saving and total usage, both opening the plan detail sheet. */
 @Composable
 private fun ComparisonStatRow(
     comparison: TariffComparison,
-    saving: Double?
+    saving: Double?,
+    onTotalSavingClick: () -> Unit,
+    onUsageClick: () -> Unit
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        StatCard(
-            title = "Current Plan",
-            value = comparison.totalCostCurrent?.let(::formatCost) ?: "–",
-            modifier = Modifier.weight(1f)
-        )
-        StatCard(
-            title = "Selected Plan",
-            value = comparison.totalCostSelected?.let(::formatCost) ?: "–",
-            modifier = Modifier.weight(1f)
-        )
-        StatCard(
-            title = "Total Saving",
-            value = saving?.let(::formatCost) ?: "–",
-            modifier = Modifier.weight(1f),
-            valueColor = if ((saving ?: 0.0) >= 0.0) {
-                PriceColors.Cheap
-            } else {
-                MaterialTheme.colorScheme.error
-            }
+    // Emit a single Column so the stat cards + comparing caption stack
+    // vertically even when the parent is the overlay Box (a Box lays out
+    // sibling children at TopStart, which would overlap them).
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            StatCard(
+                title = "Total Saving",
+                value = saving?.let(::formatCost) ?: "–",
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable(onClick = onTotalSavingClick),
+                valueColor = if ((saving ?: 0.0) >= 0.0) {
+                    PriceColors.Cheap
+                } else {
+                    MaterialTheme.colorScheme.error
+                }
+            )
+            StatCard(
+                title = "Total Usage",
+                value = String.format(java.util.Locale.UK, "%.1f kWh", comparison.totalKwh),
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable(onClick = onUsageClick)
+            )
+        }
+        Text(
+            text = "Comparing ${comparison.currentTariffName} vs ${comparison.selectedTariffName}" +
+                " · ${comparison.comparedSlotCount}/${comparison.totalSlotCount} slots compared",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
         )
     }
-    Text(
-        text = "Comparing ${comparison.currentTariffName} vs ${comparison.selectedTariffName}" +
-            " · ${comparison.comparedSlotCount}/${comparison.totalSlotCount} slots compared",
-        style = MaterialTheme.typography.labelSmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
-    )
 }
 
 /** Horizontally-scrollable quick-pick tariff chips + a "More…" chip. */
@@ -350,7 +427,10 @@ private fun SavingsChart(
     savingsPoints: List<HalfHourPoint>,
     selectedRange: DateRangeSelection,
     chartGroup: SavingsGraph,
-    sign: Double
+    sign: Double,
+    barValue: BarValue,
+    onBarValueChange: (BarValue) -> Unit,
+    onPointTapped: (BinnedPoint?) -> Unit
 ) {
     // Same binning flags as the Dashboard: calendar-day for 7D, calendar-month
     // for 6M/1Y, auto ≤20 bars otherwise.
@@ -374,14 +454,23 @@ private fun SavingsChart(
     val graph2Binned = remember(savingsPoints) { binPointsByHourOfDay(savingsPoints) }
     val binned = if (chartGroup == SavingsGraph.OVER_TIME) graph1Binned else graph2Binned
 
-    val bars = remember(binned, sign) {
+    val bars = remember(binned, sign, barValue) {
         binned.map { bin ->
+            val value = when (barValue) {
+                // Total saving per bin, pence → £, sign-flipped to the perspective.
+                BarValue.TOTAL_SAVING -> (bin.totalCost ?: 0.0) / 100.0 * sign
+                // Average unit saving/loss per kWh (p/kWh): total saving ÷ usage.
+                BarValue.UNIT_SAVING -> {
+                    val usage = bin.totalConsumption ?: 0.0
+                    if (usage > 0.0) (bin.totalCost ?: 0.0) * sign / usage else 0.0
+                }
+            }
             ChartBar(
                 label = "",   // CanvasBarChart derives x-labels from intervalStart
-                value = (bin.totalCost ?: 0.0) / 100.0 * sign,   // pence → £
+                value = value,
                 intervalStart = bin.intervalStart,
                 intervalEnd = bin.intervalEnd,
-                unitLabel = "£"
+                unitLabel = if (barValue == BarValue.UNIT_SAVING) "p/kWh" else "£"
             )
         }
     }
@@ -394,6 +483,18 @@ private fun SavingsChart(
         val min = bars.minOfOrNull { it.value } ?: 0.0
         if (min < 0.0) min * 1.1 else 0.0
     }
+    // Usage kWh series for the right-axis overlay line. Usage is independent
+    // of the saving-perspective sign, so it is never multiplied by `sign`.
+    val usageValues = remember(binned) { binned.map { it.totalConsumption ?: 0.0 } }
+    val usageYMax = remember(usageValues) { maxOf(usageValues.maxOrNull() ?: 0.0, 1.0) * 1.1 }
+    // Where the savings zero sits on the left axis (0 = bottom, 1 = top). When
+    // savings can be negative this is mid-chart, and the usage axis must extend
+    // below zero (an unused region, since usage is always >= 0) so its zero lands
+    // on the same line — giving both scales a single shared baseline.
+    val zeroFraction = remember(yMin, yMax) {
+        if (yMax != yMin) ((0.0 - yMin) / (yMax - yMin)).coerceIn(0.0, 1.0) else 0.0
+    }
+    val usageYMin = remember(usageYMax, zeroFraction) { alignUsageZeroMin(zeroFraction, usageYMax) }
 
     if (bars.isEmpty()) {
         Text(
@@ -405,6 +506,67 @@ private fun SavingsChart(
                 .padding(24.dp)
         )
     } else {
+        // Legend: bar colours (saving/loss) + the usage line, with the compact
+        // bar-value selector (a bar-chart icon that pops up the choice between
+        // total saving and average unit saving) on the right.
+        var barMenuExpanded by remember { mutableStateOf(false) }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            LegendSwatch(PriceColors.Cheap, "Saving", LegendShape.Square)
+            Spacer(Modifier.width(10.dp))
+            LegendSwatch(PriceColors.Expensive, "Loss", LegendShape.Square)
+            Spacer(Modifier.width(10.dp))
+            LegendSwatch(ChartColors.ConsumptionLine, "Usage", LegendShape.Circle)
+            Spacer(Modifier.weight(1f))
+            Box(
+                modifier = Modifier
+                    .size(32.dp)
+                    .clip(CircleShape)
+                    .clickable { barMenuExpanded = true },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.BarChart,
+                    contentDescription = "Choose bar value",
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(20.dp)
+                )
+                DropdownMenu(
+                    expanded = barMenuExpanded,
+                    onDismissRequest = { barMenuExpanded = false }
+                ) {
+                    BarValue.entries.forEach { value ->
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    text = when (value) {
+                                        BarValue.TOTAL_SAVING -> "Total saving"
+                                        BarValue.UNIT_SAVING -> "Average unit saving"
+                                    }
+                                )
+                            },
+                            leadingIcon = {
+                                if (barValue == value) {
+                                    Icon(
+                                        imageVector = Icons.Default.Check,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            },
+                            onClick = {
+                                barMenuExpanded = false
+                                onBarValueChange(value)
+                            }
+                        )
+                    }
+                }
+            }
+        }
         CanvasBarChart(
             bars = bars,
             barColors = barColors,
@@ -414,6 +576,12 @@ private fun SavingsChart(
             // 24-bar hour-of-day view bins into fixed hourly slots, so it
             // renders fit-mode with thinner bars rather than scrolling.
             isScrollable = false,
+            onBarTapped = { idx -> onPointTapped(binned.getOrNull(idx)) },
+            usageValues = usageValues,
+            usageYMin = usageYMin,
+            usageYMax = usageYMax,
+            usageLineColor = ChartColors.ConsumptionLine,
+            usageUnitLabel = "kWh",
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 8.dp)
@@ -421,11 +589,12 @@ private fun SavingsChart(
     }
 }
 
-/** "More…" bottom sheet listing all import products from the public API. */
+/** "More…" bottom sheet listing current + historical import products, with search. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun TariffPickerSheet(
     availableTariffs: List<TariffOption>,
+    historicalTariffs: List<TariffOption>,
     isLoading: Boolean,
     error: String?,
     selectedId: String,
@@ -433,6 +602,11 @@ private fun TariffPickerSheet(
     onRetry: () -> Unit,
     onDismiss: () -> Unit
 ) {
+    var query by rememberSaveable { mutableStateOf("") }
+    val current = availableTariffs.filter { matchesQuery(it, query) }
+    val historical = historicalTariffs.filter { matchesQuery(it, query) }
+    val hasResults = current.isNotEmpty() || historical.isNotEmpty()
+
     ModalBottomSheet(onDismissRequest = onDismiss) {
         when {
             isLoading -> {
@@ -469,39 +643,61 @@ private fun TariffPickerSheet(
                     }
                 }
             }
-            availableTariffs.isEmpty() -> {
-                Text(
-                    text = "No tariffs available",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(24.dp)
-                )
-            }
             else -> {
-                LazyColumn(modifier = Modifier.fillMaxWidth()) {
-                    items(availableTariffs, key = { it.id }) { option ->
-                        ListItem(
-                            headlineContent = {
-                                Text(option.displayName, fontWeight = FontWeight.Medium)
-                            },
-                            supportingContent = {
-                                Text(
-                                    text = option.id,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            },
-                            leadingContent = {
-                                if (option.id == selectedId) {
-                                    Icon(
-                                        Icons.Default.Check,
-                                        contentDescription = "Selected",
-                                        tint = MaterialTheme.colorScheme.primary
-                                    )
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    OutlinedTextField(
+                        value = query,
+                        onValueChange = { query = it },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        placeholder = { Text("Search tariffs…") },
+                        leadingIcon = {
+                            Icon(Icons.Default.Search, contentDescription = "Search")
+                        },
+                        trailingIcon = {
+                            if (query.isNotEmpty()) {
+                                IconButton(onClick = { query = "" }) {
+                                    Icon(Icons.Default.Close, contentDescription = "Clear search")
                                 }
+                            }
+                        },
+                        singleLine = true
+                    )
+                    if (!hasResults) {
+                        Text(
+                            text = if (query.isBlank()) {
+                                "No tariffs available"
+                            } else {
+                                "No matching tariffs"
                             },
-                            modifier = Modifier.clickable { onSelect(option) }
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(24.dp)
                         )
+                    } else {
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f, fill = false)
+                        ) {
+                            if (current.isNotEmpty()) {
+                                item(key = "current-header") {
+                                    PickerSectionHeader("Currently available")
+                                }
+                                items(current, key = { it.id }) { option ->
+                                    TariffPickerRow(option, selectedId, onSelect)
+                                }
+                            }
+                            if (historical.isNotEmpty()) {
+                                item(key = "historical-header") {
+                                    PickerSectionHeader("Historical (no longer on sale)")
+                                }
+                                items(historical, key = { it.id }) { option ->
+                                    TariffPickerRow(option, selectedId, onSelect)
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -510,7 +706,61 @@ private fun TariffPickerSheet(
     }
 }
 
+/** Section header inside the tariff picker. */
+@Composable
+private fun PickerSectionHeader(title: String) {
+    Text(
+        text = title,
+        style = MaterialTheme.typography.labelMedium,
+        fontWeight = FontWeight.SemiBold,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 4.dp)
+    )
+}
+
+/** One tappable tariff row in the picker. */
+@Composable
+private fun TariffPickerRow(
+    option: TariffOption,
+    selectedId: String,
+    onSelect: (TariffOption) -> Unit
+) {
+    ListItem(
+        headlineContent = {
+            Text(option.displayName, fontWeight = FontWeight.Medium)
+        },
+        supportingContent = {
+            Text(
+                text = option.id,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        },
+        leadingContent = {
+            if (option.id == selectedId) {
+                Icon(
+                    Icons.Default.Check,
+                    contentDescription = "Selected",
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            }
+        },
+        modifier = Modifier.clickable { onSelect(option) }
+    )
+}
+
+/** Search predicate: matches display name or product code, case-insensitive. */
+private fun matchesQuery(option: TariffOption, query: String): Boolean {
+    if (query.isBlank()) return true
+    val q = query.trim()
+    return option.displayName.contains(q, ignoreCase = true) ||
+        option.id.contains(q, ignoreCase = true)
+}
+
 private enum class SavingsGraph { OVER_TIME, BY_HOUR }
+
+/** What the chart bars represent: total saving (£) or per-kWh unit saving/loss (p/kWh). */
+private enum class BarValue { TOTAL_SAVING, UNIT_SAVING }
 
 /**
  * Which sign the "saving" numbers use. The use case computes

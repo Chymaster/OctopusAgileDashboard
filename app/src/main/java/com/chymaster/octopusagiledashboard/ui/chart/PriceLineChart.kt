@@ -166,14 +166,11 @@ fun PriceLineChart(
         bars.map { barColor }
     }
 
-    // Y range
-    val yMin = remember(bars) {
-        val min = bars.minOfOrNull { it.value } ?: 0.0
-        if (min < 0) min * 1.1 else 0.0
-    }
-    val yMax = remember(bars) {
-        (bars.maxOfOrNull { it.value } ?: 1.0) * 1.1
-    }
+    // Y range — cover the full drawn extent of every bar (both the upward
+    // positive stack and the downward negative stack), keeping zero inside so
+    // the baseline is always visible. Zone bars' drawn span is
+    // [sum of negative segments … sum of positive segments], not the net value.
+    val (yMin, yMax) = remember(bars) { computeBarYRange(bars) }
 
     val isScrollable = isZoomed
 
@@ -219,4 +216,41 @@ fun PriceLineChart(
             }
         )
     }
+}
+
+/**
+ * Computes the Y range (with 10% headroom) covering the full drawn extent of
+ * [bars], keeping zero inside the range so the zero baseline is always visible.
+ *
+ * For zone-breakdown bars the drawn span is from the sum of the negative
+ * segments to the sum of the positive segments (a mixed-sign bar can extend
+ * both sides of zero); the net [ChartBar.value] alone is not enough. For plain
+ * bars the span is simply [ChartBar.value].
+ *
+ * Returns `yMin to yMax`. Both ends are guarded so `yMax > 0` even for an
+ * all-negative (or all-zero) series — otherwise the zero baseline collapses to
+ * the top edge of the chart.
+ */
+internal fun computeBarYRange(bars: List<ChartBar>): Pair<Double, Double> {
+    if (bars.isEmpty()) return 0.0 to 0.01
+    val isZone = bars.any { it.hasZoneBreakdown }
+    val min = if (isZone) {
+        bars.minOfOrNull { bar ->
+            listOf(0.0, bar.greenSegment, bar.amberSegment, bar.redSegment)
+                .filter { it < 0.0 }.sum()
+        } ?: 0.0
+    } else {
+        bars.minOfOrNull { it.value } ?: 0.0
+    }
+    val max = if (isZone) {
+        bars.maxOfOrNull { bar ->
+            listOf(0.0, bar.greenSegment, bar.amberSegment, bar.redSegment)
+                .filter { it > 0.0 }.sum()
+        } ?: 0.0
+    } else {
+        bars.maxOfOrNull { it.value } ?: 0.0
+    }
+    val yMin = if (min < 0) min * 1.1 else 0.0
+    val yMax = if (max > 0) max * 1.1 else 0.01
+    return yMin to yMax
 }

@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -21,8 +22,6 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
@@ -37,6 +36,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -46,6 +46,12 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -64,6 +70,13 @@ import java.util.SortedMap
 private val londonZone = ZoneId.of("Europe/London")
 private val timeFormatter = DateTimeFormatter.ofPattern("HH:mm", Locale.UK)
 private val dateFormatter = DateTimeFormatter.ofPattern("dd MMM yyyy", Locale.UK)
+
+// Price-bar scale: 0p anchors the bar; positive prices fill rightward up to +100p
+// (ending at ~60% of screen width), negative prices extend leftward down to -10p.
+private const val PRICE_BAR_MIN_PENCE = -10.0
+private const val PRICE_BAR_MAX_PENCE = 100.0
+private const val PRICE_BAR_SCREEN_FRACTION = 0.60f // +100p ends ≈ 60% of screen width
+private const val PRICE_BAR_ZERO_GAP_DP = 6f // clearance before the -10p extent (keeps it off the time column)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -364,18 +377,21 @@ private fun PriceRow(
     val isPast = price.validTo < now
     val isCurrent = price.validFrom <= now && price.validTo > now
 
-    Card(
+    Box(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 8.dp, vertical = 1.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = if (isCurrent) {
-                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
-            } else {
-                MaterialTheme.colorScheme.surface
-            }
-        ),
-        shape = RoundedCornerShape(4.dp)
+            .padding(horizontal = 8.dp, vertical = 1.dp)
+            .then(
+                if (isCurrent) {
+                    // Current-slot highlight
+                    Modifier.background(
+                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
+                        RoundedCornerShape(4.dp)
+                    )
+                } else {
+                    Modifier
+                }
+            )
     ) {
         Row(
             modifier = Modifier
@@ -395,27 +411,12 @@ private fun PriceRow(
                 modifier = Modifier.width(50.dp)
             )
 
-            // Price color indicator
-            Box(
-                modifier = Modifier
-                    .width(4.dp)
-                    .height(24.dp)
-                    .clip(RoundedCornerShape(2.dp))
-                    .background(color)
-            )
-
-            Spacer(modifier = Modifier.width(12.dp))
-
-            // Price value
-            Text(
-                text = String.format(Locale.UK, "%.1f p/kWh", price.priceIncVat),
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal,
-                color = if (isPast) {
-                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
-                } else {
-                    color
-                },
+            // Price bar + moving value (replaces the 4dp colour indicator + price text)
+            PriceBar(
+                pricePence = price.priceIncVat,
+                fillColor = color,
+                isPast = isPast,
+                isCurrent = isCurrent,
                 modifier = Modifier.weight(1f)
             )
 
@@ -435,5 +436,82 @@ private fun PriceRow(
                 )
             }
         }
+    }
+}
+
+/**
+ * Horizontal price bar anchored at 0p. Positive prices fill rightward up to +100p
+ * ending at [PRICE_BAR_SCREEN_FRACTION] of the screen width; negative prices extend
+ * leftward from zero down to -10p. The zero point is shifted right of the time column
+ * so negative bars never overlap it. No track or background is drawn — just the
+ * coloured fill. The price value rides the fill's right end (the zero point for
+ * negatives) and moves with it.
+ */
+@Composable
+private fun PriceBar(
+    pricePence: Double,
+    fillColor: Color,
+    isPast: Boolean,
+    isCurrent: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val density = LocalDensity.current
+    val screenWidthDp = LocalConfiguration.current.screenWidthDp.toFloat()
+    var areaLeftDp by remember { mutableFloatStateOf(0f) }
+
+    // Zero-centred scale: 0p anchors the bar, positive prices fill rightward up to
+    // +100p (ending at PRICE_BAR_SCREEN_FRACTION of the screen), negative prices extend
+    // leftward down to -10p. The zero point is shifted right of the time column so the
+    // -10p extent never overlaps it. The +100p anchor is made exact by subtracting this
+    // area's on-screen left offset (measured once).
+    val anchorDp = (screenWidthDp * PRICE_BAR_SCREEN_FRACTION - areaLeftDp)
+        .coerceAtLeast(64f)
+    val dpPerPence = (anchorDp - PRICE_BAR_ZERO_GAP_DP) /
+        (PRICE_BAR_MAX_PENCE.toFloat() - PRICE_BAR_MIN_PENCE.toFloat())
+    val zeroDp = (-PRICE_BAR_MIN_PENCE) * dpPerPence + PRICE_BAR_ZERO_GAP_DP
+
+    val clampedPence = pricePence.toFloat()
+        .coerceIn(PRICE_BAR_MIN_PENCE.toFloat(), PRICE_BAR_MAX_PENCE.toFloat())
+    val fillStartDp = zeroDp + kotlin.math.min(clampedPence, 0f) * dpPerPence
+    val fillWidthDp = kotlin.math.abs(clampedPence) * dpPerPence
+    val labelDp = zeroDp + kotlin.math.max(clampedPence, 0f) * dpPerPence
+
+    Box(
+        modifier = modifier
+            .onGloballyPositioned { coords ->
+                areaLeftDp = with(density) { coords.boundsInWindow().left.toDp().value }
+            }
+    ) {
+        // Coloured fill: anchored at 0p, positive prices extend rightward and negative
+        // prices leftward (down to -10p)
+        Box(
+            modifier = Modifier
+                .align(Alignment.CenterStart)
+                .offset(x = fillStartDp.dp)
+                .width(fillWidthDp.dp)
+                .height(8.dp)
+                .clip(RoundedCornerShape(4.dp))
+                .background(fillColor)
+        )
+        // Price value at the bar's right end (the zero point for negative prices),
+        // clamped so it never clips off-screen/under NOW
+        Text(
+            text = String.format(Locale.UK, "%.1f p/kWh", pricePence),
+            style = MaterialTheme.typography.bodyLarge,
+            fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal,
+            color = if (isPast) {
+                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+            } else {
+                fillColor
+            },
+            modifier = Modifier.layout { measurable, constraints ->
+                val placeable = measurable.measure(constraints)
+                val rawX = (labelDp + 6f).dp.roundToPx()
+                val maxX = (constraints.maxWidth - placeable.width).coerceAtLeast(0)
+                layout(placeable.width, placeable.height) {
+                    placeable.place(rawX.coerceAtMost(maxX), 0)
+                }
+            }
+        )
     }
 }

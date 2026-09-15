@@ -533,21 +533,25 @@ fun binPointsByCalendarDay(
 
 /**
  * Groups half-hour points by hour-of-day (00:00–23:00 London time) and sums
- * each hour's `costIncVat` (e.g. per-slot savings) across the whole range.
+ * each hour's `costIncVat` (e.g. per-slot savings) and `consumptionKwh`
+ * (usage) across the whole range.
  *
  * Returns 24 [BinnedPoint]s (one per hour) using a fixed reference date so the
  * x-axis renders as plain `HH:mm` hour labels rather than a multi-day series.
- * Hours with no points are returned with a null [BinnedPoint.totalCost].
+ * Hours with no points are returned with a null [BinnedPoint.totalCost] and
+ * [BinnedPoint.totalConsumption].
  */
 fun binPointsByHourOfDay(points: List<HalfHourPoint>): List<BinnedPoint> {
     if (points.isEmpty()) return emptyList()
     val londonZone = ZoneId.of("Europe/London")
     val referenceDate = LocalDate.of(2000, 1, 1)
     val totals = DoubleArray(24)
+    val consumption = DoubleArray(24)
     val counts = IntArray(24)
     for (point in points) {
         val hour = point.intervalStart.atZone(londonZone).hour
         totals[hour] += point.costIncVat ?: 0.0
+        consumption[hour] += point.consumptionKwh ?: 0.0
         counts[hour]++
     }
     return (0 until 24).map { hour ->
@@ -557,11 +561,24 @@ fun binPointsByHourOfDay(points: List<HalfHourPoint>): List<BinnedPoint> {
             intervalStart = start,
             intervalEnd = end,
             avgPrice = null,
-            totalConsumption = null,
+            totalConsumption = consumption[hour].takeIf { counts[hour] > 0 },
             totalCost = totals[hour].takeIf { counts[hour] > 0 },
             pointCount = counts[hour]
         )
     }
+}
+
+/**
+ * Returns the lower bound for a secondary (always non-negative) axis that puts
+ * its zero on the same vertical line as the primary axis's zero, so both scales
+ * share one baseline. [zeroFraction] is where the primary zero sits between its
+ * min and max (0 = chart bottom, 1 = top); [usageYMax] is the secondary axis's
+ * chosen upper bound.
+ */
+internal fun alignUsageZeroMin(zeroFraction: Double, usageYMax: Double): Double {
+    if (zeroFraction <= 0.0) return 0.0
+    if (zeroFraction >= 1.0) return -usageYMax
+    return -(zeroFraction / (1.0 - zeroFraction)) * usageYMax
 }
 
 /**

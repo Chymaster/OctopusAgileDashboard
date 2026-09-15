@@ -211,7 +211,15 @@ class OctopusRepositoryImpl @Inject constructor(
             if (isDemo) {
                 val tariffCode = preferencesRepository.tariffConfig.first().tariffCode
                 val generated = DemoDataGenerator.generateAgilePriceEntities(start, end, tariffCode)
+                val startMs = start.toEpochMilli()
+                val endMs = end.toEpochMilli()
+                // Drop any stale off-grid rows written by older demo versions so
+                // they can't linger as duplicates or skew Room's range counts.
+                agilePriceDao.deleteNonCanonicalInRange(startMs, endMs)
                 agilePriceDao.insertAll(generated)
+                // Also clear off-grid rows from the in-memory cache (real API
+                // rates are always grid-aligned, so this is safe).
+                _agilePrices.value = _agilePrices.value.filter { it.validFrom % HALF_HOUR_MILLIS == 0L }
                 mergeAndEmitAgilePrices(generated, start, end)
                 Result.success(generated.map { it.toDomain() })
             } else {

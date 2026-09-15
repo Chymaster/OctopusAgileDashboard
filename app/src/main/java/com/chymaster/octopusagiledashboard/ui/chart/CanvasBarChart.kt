@@ -55,9 +55,9 @@ data class ChartBar(
     /** Unit label for tooltips (e.g. "kWh", "£"). */
     val unitLabel: String = "kWh",
 ) {
-    /** True when at least one zone segment carries non-zero consumption. */
+    /** True when at least one zone segment carries non-zero value (can be negative). */
     val hasZoneBreakdown: Boolean
-        get() = greenSegment > 0.0 || amberSegment > 0.0 || redSegment > 0.0
+        get() = greenSegment != 0.0 || amberSegment != 0.0 || redSegment != 0.0
 }
 
 /**
@@ -88,6 +88,9 @@ fun CanvasBarChart(
     usageYMin: Double = 0.0,
     usageYMax: Double = 0.0,
     usageLineColor: Color = ChartColors.ConsumptionLine,
+    // Unit for the overlay value in the plain-bar tooltip (e.g. "kWh").
+    // When null (the default) the tooltip omits the overlay value.
+    usageUnitLabel: String? = null,
 ) {
     val labelColor = MaterialTheme.colorScheme.onSurfaceVariant
 
@@ -248,53 +251,85 @@ fun CanvasBarChart(
                         val bar = bars[i]
                         val value = bar.value
                         val isTapped = i == tappedIndex || i == selectedIndex
-                        val fraction = if (yMax != yMin) {
-                            ((value - yMin) / (yMax - yMin)).coerceIn(0.0, 1.0)
-                        } else 0.5
                         val x = chartLeft + i * (barWidth + gap)
 
-                        val barTop: Float
-                        val barDrawHeight: Float
-                        if (value >= 0 || yMin >= 0) {
-                            barTop = zeroY - (chartHeight * (fraction - zeroFraction).coerceAtLeast(0.0)).toFloat()
-                            barDrawHeight = zeroY - barTop
-                        } else {
-                            barTop = zeroY
-                            barDrawHeight = (chartHeight * (zeroFraction - fraction).coerceAtLeast(0.0)).toFloat()
-                        }
+                        // Full drawn extent of this bar (both directions around the
+                        // zero line), used for the tap highlight and tooltip.
+                        val drawnTop: Float
+                        val drawnBottom: Float
+                        if (bar.hasZoneBreakdown) {
+                            // Dual-direction stacked zones: positive segments stack
+                            // up from the zero line (green nearest zero, red outermost),
+                            // negative segments stack down (green nearest zero). Heights
+                            // are proportional to each segment's own magnitude across the
+                            // full y-range, so mixed-sign bins neither overflow the
+                            // baseline nor disappear.
+                            val scale = if (yMax != yMin) chartHeight / (yMax - yMin) else 0.0
+                            var topCursor = zeroY
+                            var bottomCursor = zeroY
 
-                        if (barDrawHeight > 0f) {
-                            if (bar.hasZoneBreakdown) {
-                                // Draw stacked green/amber/red segments
-                                val segmentTotal = bar.greenSegment + bar.amberSegment + bar.redSegment
-                                if (segmentTotal > 0.0) {
-                                    val segments = listOf(
-                                        Triple(bar.greenSegment, PriceColors.Cheap, false),
-                                        Triple(bar.amberSegment, PriceColors.Moderate, false),
-                                        Triple(bar.redSegment, PriceColors.Expensive, true),
-                                    )
-                                    var segTop = barTop
-                                    for ((segVal, segColor, isLast) in segments) {
-                                        if (segVal <= 0.0) continue
-                                        val segHeight = ((segVal / segmentTotal) * barDrawHeight.toDouble())
-                                            .toFloat().coerceAtLeast(0.5f)
-                                        val cornerRadius = if (isLast && segTop <= barTop + 1f) {
-                                            // Only one segment or top segment — round top corners
-                                            CornerRadius(2.dp.toPx(), 2.dp.toPx())
-                                        } else {
-                                            CornerRadius(0f, 0f)
-                                        }
-                                        drawRoundRect(
-                                            color = segColor,
-                                            topLeft = Offset(x, segTop),
-                                            size = Size(barWidth, segHeight),
-                                            cornerRadius = cornerRadius
-                                        )
-                                        segTop += segHeight
+                            // Positive segments — stack upward
+                            val pos = listOf(
+                                Pair(bar.greenSegment, PriceColors.Cheap),
+                                Pair(bar.amberSegment, PriceColors.Moderate),
+                                Pair(bar.redSegment, PriceColors.Expensive),
+                            ).filter { it.first > 0.0 }
+                            pos.forEachIndexed { idx, (segVal, segColor) ->
+                                val segHeight = (segVal * scale).toFloat().coerceAtLeast(0.5f)
+                                drawRoundRect(
+                                    color = segColor,
+                                    topLeft = Offset(x, topCursor - segHeight),
+                                    size = Size(barWidth, segHeight),
+                                    cornerRadius = if (idx == pos.size - 1) {
+                                        // Outermost positive segment — round top corners
+                                        CornerRadius(2.dp.toPx(), 2.dp.toPx())
+                                    } else {
+                                        CornerRadius(0f, 0f)
                                     }
-                                }
+                                )
+                                topCursor -= segHeight
+                            }
+
+                            // Negative segments — stack downward, far→near so green
+                            // (the usual negative zone) sits closest to the zero line.
+                            val neg = listOf(
+                                Pair(bar.redSegment, PriceColors.Expensive),
+                                Pair(bar.amberSegment, PriceColors.Moderate),
+                                Pair(bar.greenSegment, PriceColors.Cheap),
+                            ).filter { it.first < 0.0 }
+                            neg.forEachIndexed { idx, (segVal, segColor) ->
+                                val segHeight = (-segVal * scale).toFloat().coerceAtLeast(0.5f)
+                                drawRoundRect(
+                                    color = segColor,
+                                    topLeft = Offset(x, bottomCursor),
+                                    size = Size(barWidth, segHeight),
+                                    cornerRadius = if (idx == neg.size - 1) {
+                                        // Outermost negative segment — round bottom corners
+                                        CornerRadius(2.dp.toPx(), 2.dp.toPx())
+                                    } else {
+                                        CornerRadius(0f, 0f)
+                                    }
+                                )
+                                bottomCursor += segHeight
+                            }
+
+                            drawnTop = minOf(zeroY, topCursor)
+                            drawnBottom = maxOf(zeroY, bottomCursor)
+                        } else {
+                            // Single-color bar (backward-compatible with PriceLineChart)
+                            val fraction = if (yMax != yMin) {
+                                ((value - yMin) / (yMax - yMin)).coerceIn(0.0, 1.0)
+                            } else 0.5
+                            val barTop: Float
+                            val barDrawHeight: Float
+                            if (value >= 0 || yMin >= 0) {
+                                barTop = zeroY - (chartHeight * (fraction - zeroFraction).coerceAtLeast(0.0)).toFloat()
+                                barDrawHeight = zeroY - barTop
                             } else {
-                                // Single-color bar (backward-compatible with PriceLineChart)
+                                barTop = zeroY
+                                barDrawHeight = (chartHeight * (zeroFraction - fraction).coerceAtLeast(0.0)).toFloat()
+                            }
+                            if (barDrawHeight > 0f) {
                                 val color = barColors.getOrElse(i) { barColors.last() }
                                 drawRoundRect(
                                     color = color,
@@ -303,19 +338,21 @@ fun CanvasBarChart(
                                     cornerRadius = CornerRadius(2.dp.toPx(), 2.dp.toPx())
                                 )
                             }
+                            drawnTop = barTop
+                            drawnBottom = barTop + barDrawHeight
                         }
 
                         // Tapped bar highlight + tooltip
                         if (isTapped) {
                             drawRoundRect(
                                 color = Color.White.copy(alpha = 0.3f),
-                                topLeft = Offset(x, barTop),
-                                size = Size(barWidth, barDrawHeight),
+                                topLeft = Offset(x, drawnTop),
+                                size = Size(barWidth, drawnBottom - drawnTop),
                                 cornerRadius = CornerRadius(2.dp.toPx(), 2.dp.toPx())
                             )
 
                             val tooltipX = x + barWidth / 2
-                            val tooltipY = if (value >= 0) barTop - 8.dp.toPx() else barTop + barDrawHeight + 18.dp.toPx()
+                            val tooltipY = if (value >= 0) drawnTop - 8.dp.toPx() else drawnBottom + 18.dp.toPx()
 
                             if (bar.hasZoneBreakdown) {
                                 // Zone-breakdown tooltip: consumption + zone breakdown
@@ -365,7 +402,7 @@ fun CanvasBarChart(
                                 drawContext.canvas.nativeCanvas.drawText(zoneText, tooltipX, tooltipY - 6.dp.toPx(), zonePaint)
                                 drawContext.canvas.nativeCanvas.drawText(timeText, tooltipX, tooltipY + 6.dp.toPx(), timePaint)
                             } else {
-                                // Original tooltip for single-color bars
+                                // Tooltip for single-color bars.
                                 val tooltipText = String.format(Locale.UK, "%.1f %s", value, bar.unitLabel)
                                 val timeText = bar.intervalStart.atZone(londonZone).format(timeFormatter)
                                 val tooltipPaint = android.graphics.Paint().apply {
@@ -380,31 +417,70 @@ fun CanvasBarChart(
                                     isAntiAlias = true
                                 }
 
-                                val textWidth = tooltipPaint.measureText("$tooltipText $timeText")
-                                val bgRect = android.graphics.RectF(
-                                    tooltipX - textWidth / 2 - 6.dp.toPx(),
-                                    tooltipY - 14.dp.toPx(),
-                                    tooltipX + textWidth / 2 + 6.dp.toPx(),
-                                    tooltipY + 4.dp.toPx()
-                                )
-                                drawContext.canvas.nativeCanvas.drawRoundRect(bgRect, 4.dp.toPx(), 4.dp.toPx(), bgPaint)
-                                drawContext.canvas.nativeCanvas.drawText(
-                                    tooltipText,
-                                    tooltipX,
-                                    tooltipY - 2.dp.toPx(),
-                                    tooltipPaint
-                                )
-                                val timePaint = android.graphics.Paint(tooltipPaint).apply {
-                                    this.color = android.graphics.Color.LTGRAY
-                                    textSize = 8.sp.toPx()
-                                    isFakeBoldText = false
+                                // When a usage line is overlaid and its unit is
+                                // provided, show a 3-line tooltip: value, usage, time.
+                                val usageLine = if (hasUsageLine) {
+                                    usageUnitLabel?.let {
+                                        String.format(Locale.UK, "%.2f %s", usageData?.getOrNull(i) ?: 0.0, it)
+                                    }
+                                } else {
+                                    null
                                 }
-                                drawContext.canvas.nativeCanvas.drawText(
-                                    timeText,
-                                    tooltipX,
-                                    tooltipY + 8.dp.toPx(),
-                                    timePaint
-                                )
+                                if (usageLine != null) {
+                                    val usagePaint = android.graphics.Paint().apply {
+                                        this.color = android.graphics.Color.argb(255, 200, 200, 200)
+                                        textSize = 8.sp.toPx()
+                                        textAlign = android.graphics.Paint.Align.CENTER
+                                        isAntiAlias = true
+                                    }
+                                    val timePaint = android.graphics.Paint(tooltipPaint).apply {
+                                        this.color = android.graphics.Color.LTGRAY
+                                        textSize = 8.sp.toPx()
+                                        isFakeBoldText = false
+                                    }
+                                    val maxLineWidth = maxOf(
+                                        tooltipPaint.measureText(tooltipText),
+                                        usagePaint.measureText(usageLine),
+                                        timePaint.measureText(timeText)
+                                    )
+                                    val bgRect = android.graphics.RectF(
+                                        tooltipX - maxLineWidth / 2 - 6.dp.toPx(),
+                                        tooltipY - 28.dp.toPx(),
+                                        tooltipX + maxLineWidth / 2 + 6.dp.toPx(),
+                                        tooltipY + 12.dp.toPx()
+                                    )
+                                    drawContext.canvas.nativeCanvas.drawRoundRect(bgRect, 4.dp.toPx(), 4.dp.toPx(), bgPaint)
+                                    drawContext.canvas.nativeCanvas.drawText(tooltipText, tooltipX, tooltipY - 16.dp.toPx(), tooltipPaint)
+                                    drawContext.canvas.nativeCanvas.drawText(usageLine, tooltipX, tooltipY - 6.dp.toPx(), usagePaint)
+                                    drawContext.canvas.nativeCanvas.drawText(timeText, tooltipX, tooltipY + 6.dp.toPx(), timePaint)
+                                } else {
+                                    // Original 2-line tooltip for single-color bars.
+                                    val textWidth = tooltipPaint.measureText("$tooltipText $timeText")
+                                    val bgRect = android.graphics.RectF(
+                                        tooltipX - textWidth / 2 - 6.dp.toPx(),
+                                        tooltipY - 14.dp.toPx(),
+                                        tooltipX + textWidth / 2 + 6.dp.toPx(),
+                                        tooltipY + 4.dp.toPx()
+                                    )
+                                    drawContext.canvas.nativeCanvas.drawRoundRect(bgRect, 4.dp.toPx(), 4.dp.toPx(), bgPaint)
+                                    drawContext.canvas.nativeCanvas.drawText(
+                                        tooltipText,
+                                        tooltipX,
+                                        tooltipY - 2.dp.toPx(),
+                                        tooltipPaint
+                                    )
+                                    val timePaint = android.graphics.Paint(tooltipPaint).apply {
+                                        this.color = android.graphics.Color.LTGRAY
+                                        textSize = 8.sp.toPx()
+                                        isFakeBoldText = false
+                                    }
+                                    drawContext.canvas.nativeCanvas.drawText(
+                                        timeText,
+                                        tooltipX,
+                                        tooltipY + 8.dp.toPx(),
+                                        timePaint
+                                    )
+                                }
                             }
                         }
                     }

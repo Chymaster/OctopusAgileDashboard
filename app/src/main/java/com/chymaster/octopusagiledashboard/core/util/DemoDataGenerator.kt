@@ -20,6 +20,9 @@ object DemoDataGenerator {
 
     private val londonZone = ZoneId.of("Europe/London")
 
+    /** Half-hour slot interval in seconds — the canonical :00/:30 grid. */
+    private const val HALF_HOUR_SECONDS = 1800L
+
     /**
      * Generate demo [ConsumptionEntity] rows for [start] to [end] using a
      * time-of-day household profile. Rows are tagged with the demo MPAN/serial
@@ -61,7 +64,9 @@ object DemoDataGenerator {
         tariffCode: String
     ): List<AgilePriceEntity> {
         val rows = mutableListOf<AgilePriceEntity>()
-        var t = start
+        // Align to the canonical :00/:30 grid so overlapping requests always
+        // produce identical validFrom keys and PK dedup collapses them.
+        var t = Instant.ofEpochSecond(Math.floorDiv(start.epochSecond, HALF_HOUR_SECONDS) * HALF_HOUR_SECONDS)
         while (t.isBefore(end)) {
             val next = t.plus(30, ChronoUnit.MINUTES)
             val zdt = t.atZone(londonZone)
