@@ -43,6 +43,9 @@ Connect your Octopus Energy account to unlock detailed historical analysis:
 • Cost breakdown with donut chart separating usage costs from standing charges, plus per-zone usage cost split
 • Usage zone analysis showing how much of your consumption fell in each price band
 
+**💷 Tariff Comparison**
+Wondering if you're on the right tariff? Compare what you actually paid against other Octopus tariffs over any time range, and see how much you would have saved — or lost. Tap any bar for a full breakdown of savings and usage, switch the chart between total saving, average unit saving, and usage, and browse both currently available and historical tariffs with a built-in search. Tap the total saving figure to compare your current plan against another side by side.
+
 **🔮 Future Prices**
 Plan ahead with a full price schedule up to 2 days in the future. Prices are grouped by date with the current slot highlighted, so you can find the best time to charge your EV, run your heat pump, or do the laundry.
 
@@ -53,7 +56,9 @@ Plan ahead with a full price schedule up to 2 days in the future. Prices are gro
 
 ## What's new
 
-• Zone-breakdown bars in Usage and Cost charts (green/amber/red)
-• Calendar-aligned bins and per-zone cost donut chart
-• Smoother, thicker chart bars with loading indicator
-• Bug fixes and performance improvements
+• Future Prices: horizontal price bars anchored at zero, now including negative prices
+• Tariff Comparison: tap any bar for a detailed savings and usage breakdown
+• Tariff Comparison: choose what the bars show — total saving, average unit saving, or usage
+• Tariff Comparison: browse and search historical tariffs
+• Tap Total Saving on Tariff Comparison for a side-by-side plan comparison
+• Fixed demo prices duplicating on refresh
