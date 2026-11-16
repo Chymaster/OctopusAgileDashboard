@@ -2,10 +2,13 @@ package com.chymaster.octopusagiledashboard.ui.future
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.chymaster.octopusagiledashboard.core.util.TariffNames
 import com.chymaster.octopusagiledashboard.data.prefs.UserPreferencesRepository
 import com.chymaster.octopusagiledashboard.data.repository.OctopusRepository
+import com.chymaster.octopusagiledashboard.data.repository.TariffScheduleRepository
 import com.chymaster.octopusagiledashboard.domain.model.AgilePrice
 import com.chymaster.octopusagiledashboard.domain.model.toUserMessage
+import com.chymaster.octopusagiledashboard.domain.tariff.TariffScheduleResolver
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
@@ -35,14 +38,17 @@ data class FuturePricesUiState(
     /** Earliest date currently loaded — used to know where to extend from. */
     val loadedStartDay: LocalDate? = null,
     /** When non-null, the UI should scroll to this date's section. */
-    val scrollTargetDate: LocalDate? = null
+    val scrollTargetDate: LocalDate? = null,
+    /** Tariff in force right now (drives the screen title). */
+    val currentTariffName: String? = null
 )
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class FuturePricesViewModel @Inject constructor(
     private val repository: OctopusRepository,
-    private val preferencesRepository: UserPreferencesRepository
+    private val preferencesRepository: UserPreferencesRepository,
+    private val tariffScheduleRepository: TariffScheduleRepository
 ) : ViewModel() {
 
     private val londonZone = ZoneId.of("Europe/London")
@@ -54,6 +60,16 @@ class FuturePricesViewModel @Inject constructor(
 
     init {
         dataJob = loadData()
+
+        // Tariff name for the title.
+        viewModelScope.launch {
+            tariffScheduleRepository.state.collect { schedule ->
+                val current = TariffScheduleResolver.agreementAt(schedule.agreements, Instant.now())
+                _uiState.update {
+                    it.copy(currentTariffName = current?.productCode?.let(TariffNames::displayName))
+                }
+            }
+        }
 
         // Observe threshold preferences
         viewModelScope.launch {

@@ -33,17 +33,19 @@ fun StandingChargeEntity.toDomain(): StandingCharge {
         validFrom = Instant.ofEpochMilli(validFrom),
         validTo = Instant.ofEpochMilli(validTo),
         valueExcVat = valueExcVat,
-        valueIncVat = valueIncVat
+        valueIncVat = valueIncVat,
+        tariffCode = tariffCode
     )
 }
 
-fun StandingChargeDto.toDomain(): StandingCharge {
+fun StandingChargeDto.toDomain(tariffCode: String? = null): StandingCharge {
     val validFromInstant = OffsetDateTime.parse(validFrom).toInstant()
     val validToInstant = parseStandingChargeEnd(validTo, validFromInstant)
     return StandingCharge(
         validFrom = validFromInstant,
         validTo = validToInstant,
         valueExcVat = valueExcVat,
-        valueIncVat = valueIncVat
+        valueIncVat = valueIncVat,
+        tariffCode = tariffCode
     )
 }

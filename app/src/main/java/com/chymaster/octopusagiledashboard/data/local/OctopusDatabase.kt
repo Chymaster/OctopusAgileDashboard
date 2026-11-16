@@ -12,7 +12,7 @@ import com.chymaster.octopusagiledashboard.data.local.entity.StandingChargeEntit
 
 @Database(
     entities = [AgilePriceEntity::class, ConsumptionEntity::class, StandingChargeEntity::class],
-    version = 2,
+    version = 3,
     exportSchema = true
 )
 @TypeConverters(Converters::class)

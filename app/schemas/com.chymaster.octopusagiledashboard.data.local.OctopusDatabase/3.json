@@ -1,0 +1,195 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 3,
+    "identityHash": "19bf6a3930eefe4b914609476b6ad247",
+    "entities": [
+      {
+        "tableName": "agile_prices",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`validFrom` INTEGER NOT NULL, `validTo` INTEGER NOT NULL, `priceExcVat` REAL NOT NULL, `priceIncVat` REAL NOT NULL, `tariffCode` TEXT NOT NULL, PRIMARY KEY(`validFrom`, `tariffCode`))",
+        "fields": [
+          {
+            "fieldPath": "validFrom",
+            "columnName": "validFrom",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "validTo",
+            "columnName": "validTo",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "priceExcVat",
+            "columnName": "priceExcVat",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "priceIncVat",
+            "columnName": "priceIncVat",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "tariffCode",
+            "columnName": "tariffCode",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "validFrom",
+            "tariffCode"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_agile_prices_validFrom_validTo",
+            "unique": false,
+            "columnNames": [
+              "validFrom",
+              "validTo"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_agile_prices_validFrom_validTo` ON `${TABLE_NAME}` (`validFrom`, `validTo`)"
+          },
+          {
+            "name": "index_agile_prices_tariffCode",
+            "unique": false,
+            "columnNames": [
+              "tariffCode"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_agile_prices_tariffCode` ON `${TABLE_NAME}` (`tariffCode`)"
+          }
+        ]
+      },
+      {
+        "tableName": "consumption",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`intervalStart` INTEGER NOT NULL, `intervalEnd` INTEGER NOT NULL, `consumption` REAL NOT NULL, `mpan` TEXT NOT NULL, `serialNumber` TEXT NOT NULL, PRIMARY KEY(`intervalStart`, `mpan`))",
+        "fields": [
+          {
+            "fieldPath": "intervalStart",
+            "columnName": "intervalStart",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "intervalEnd",
+            "columnName": "intervalEnd",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "consumption",
+            "columnName": "consumption",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "mpan",
+            "columnName": "mpan",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "serialNumber",
+            "columnName": "serialNumber",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "intervalStart",
+            "mpan"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_consumption_intervalStart",
+            "unique": false,
+            "columnNames": [
+              "intervalStart"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_consumption_intervalStart` ON `${TABLE_NAME}` (`intervalStart`)"
+          }
+        ]
+      },
+      {
+        "tableName": "standing_charges",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`validFrom` INTEGER NOT NULL, `validTo` INTEGER NOT NULL, `valueExcVat` REAL NOT NULL, `valueIncVat` REAL NOT NULL, `tariffCode` TEXT NOT NULL, PRIMARY KEY(`validFrom`, `tariffCode`))",
+        "fields": [
+          {
+            "fieldPath": "validFrom",
+            "columnName": "validFrom",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "validTo",
+            "columnName": "validTo",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "valueExcVat",
+            "columnName": "valueExcVat",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "valueIncVat",
+            "columnName": "valueIncVat",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "tariffCode",
+            "columnName": "tariffCode",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "validFrom",
+            "tariffCode"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_standing_charges_validFrom_validTo",
+            "unique": false,
+            "columnNames": [
+              "validFrom",
+              "validTo"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_standing_charges_validFrom_validTo` ON `${TABLE_NAME}` (`validFrom`, `validTo`)"
+          },
+          {
+            "name": "index_standing_charges_tariffCode",
+            "unique": false,
+            "columnNames": [
+              "tariffCode"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_standing_charges_tariffCode` ON `${TABLE_NAME}` (`tariffCode`)"
+          }
+        ]
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '19bf6a3930eefe4b914609476b6ad247')"
+    ]
+  }
+}

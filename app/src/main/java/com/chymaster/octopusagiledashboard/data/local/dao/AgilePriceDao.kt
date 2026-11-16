@@ -13,9 +13,31 @@ interface AgilePriceDao {
     @Query("SELECT * FROM agile_prices WHERE validFrom >= :startMillis AND validTo <= :endMillis ORDER BY validFrom ASC")
     fun observeRange(startMillis: Long, endMillis: Long): Flow<List<AgilePriceEntity>>
 
-    /** One-shot query for loading data into the in-memory cache. */
+    /** One-shot query for loading data into the in-memory cache (all tariffs). */
     @Query("SELECT * FROM agile_prices WHERE validFrom >= :startMillis AND validTo <= :endMillis ORDER BY validFrom ASC")
     suspend fun queryRange(startMillis: Long, endMillis: Long): List<AgilePriceEntity>
+
+    /** Rates for one tariff over the range. */
+    @Query(
+        "SELECT * FROM agile_prices WHERE tariffCode = :tariffCode " +
+            "AND validFrom >= :startMillis AND validFrom < :endMillis ORDER BY validFrom ASC"
+    )
+    suspend fun queryRangeForTariff(
+        tariffCode: String,
+        startMillis: Long,
+        endMillis: Long
+    ): List<AgilePriceEntity>
+
+    /** Rates for any of [tariffCodes] over the range (multi-tariff history). */
+    @Query(
+        "SELECT * FROM agile_prices WHERE tariffCode IN (:tariffCodes) " +
+            "AND validFrom >= :startMillis AND validFrom < :endMillis ORDER BY validFrom ASC"
+    )
+    suspend fun queryRangeForTariffs(
+        tariffCodes: List<String>,
+        startMillis: Long,
+        endMillis: Long
+    ): List<AgilePriceEntity>
 
     @Query("DELETE FROM agile_prices WHERE validFrom >= :startMillis AND validTo <= :endMillis")
     suspend fun deleteRange(startMillis: Long, endMillis: Long)
@@ -37,6 +59,20 @@ interface AgilePriceDao {
 
     @Query("SELECT COUNT(*) FROM agile_prices WHERE validFrom >= :startMillis AND validTo <= :endMillis")
     suspend fun countInRange(startMillis: Long, endMillis: Long): Int
+
+    /** Number of cached slots for one tariff in the range. */
+    @Query(
+        "SELECT COUNT(*) FROM agile_prices WHERE tariffCode = :tariffCode " +
+            "AND validFrom >= :startMillis AND validFrom < :endMillis"
+    )
+    suspend fun countInRangeForTariff(
+        tariffCode: String,
+        startMillis: Long,
+        endMillis: Long
+    ): Int
+
+    @Query("DELETE FROM agile_prices WHERE tariffCode = :tariffCode")
+    suspend fun deleteForTariff(tariffCode: String)
 
     @Query("DELETE FROM agile_prices")
     suspend fun deleteAll()

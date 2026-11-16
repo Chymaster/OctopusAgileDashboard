@@ -11,7 +11,10 @@ import java.time.Instant
  * computed over the full [rangeStart]..[rangeEnd] (Dashboard-style).
  */
 data class TariffComparison(
+    /** Display name(s) of the actual tariff history, e.g. "Agile Octopus → Cosy Octopus". */
     val currentTariffName: String,
+    /** Distinct display names of every tariff in force over the range. */
+    val currentTariffNames: List<String> = listOf(currentTariffName),
     val selectedTariffName: String,
     val rangeStart: Instant,
     val rangeEnd: Instant,

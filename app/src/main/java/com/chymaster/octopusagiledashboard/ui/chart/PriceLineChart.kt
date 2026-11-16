@@ -22,6 +22,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.chymaster.octopusagiledashboard.domain.model.HalfHourPoint
 import com.chymaster.octopusagiledashboard.ui.theme.PriceColors
+import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -41,6 +42,7 @@ fun PriceLineChart(
     referencePrice: Double? = null,
     cheapThresholdPercent: Int = PriceColors.DEFAULT_CHEAP_PERCENT,
     moderateThresholdPercent: Int = PriceColors.DEFAULT_MODERATE_PERCENT,
+    switchInstants: List<Instant> = emptyList(),
 ) {
     // Reset zoom whenever the data changes (range switch / refresh) so the
     // chart returns to the binned overview instead of showing every half-hour
@@ -204,6 +206,9 @@ fun PriceLineChart(
             yMin = yMin,
             yMax = yMax,
             isScrollable = isScrollable,
+            markers = remember(bars, switchInstants) {
+                buildChartMarkers(bars.map { it.intervalStart to it.intervalEnd }, switchInstants)
+            },
             onBarTapped = { idx ->
                 if (useBinned && displayData != null) {
                     onPointTapped(displayData.getOrNull(idx))

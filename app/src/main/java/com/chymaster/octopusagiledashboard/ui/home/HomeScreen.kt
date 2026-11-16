@@ -152,7 +152,8 @@ fun HomeScreen(
                                     moderatePercent = uiState.moderateThresholdPercent,
                                     modifier = Modifier
                                         .fillMaxSize()
-                                        .padding(12.dp)
+                                        .padding(12.dp),
+                                    label = uiState.currentTariffName ?: "Price"
                                 )
                             }
 

@@ -33,17 +33,19 @@ fun AgilePriceEntity.toDomain(): AgilePrice {
         validFrom = Instant.ofEpochMilli(validFrom),
         validTo = Instant.ofEpochMilli(validTo),
         priceExcVat = priceExcVat,
-        priceIncVat = priceIncVat
+        priceIncVat = priceIncVat,
+        tariffCode = tariffCode
     )
 }
 
-fun AgileRateDto.toDomain(): AgilePrice {
+fun AgileRateDto.toDomain(tariffCode: String? = null): AgilePrice {
     val validFromInstant = OffsetDateTime.parse(validFrom).toInstant()
     val validToInstant = parseRateEnd(validTo, validFromInstant)
     return AgilePrice(
         validFrom = validFromInstant,
         validTo = validToInstant,
         priceExcVat = valueExcVat,
-        priceIncVat = valueIncVat
+        priceIncVat = valueIncVat,
+        tariffCode = tariffCode
     )
 }
