@@ -19,6 +19,13 @@ interface OctopusRepository {
     fun observeStandingCharges(start: Instant, end: Instant): Flow<List<StandingCharge>>
 
     /**
+     * Total standing-charge cost (pence) over `[start, end)`, pricing each
+     * London calendar day with the tariff in force at its start. Null when no
+     * charge is known for the range.
+     */
+    fun observeStandingChargeTotal(start: Instant, end: Instant): Flow<Double?>
+
+    /**
      * Get agile prices for [start]..[end].
      *
      * Tiered cache: in-memory → Room (with gap detection) → API.

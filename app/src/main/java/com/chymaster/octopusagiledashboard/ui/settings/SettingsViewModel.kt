@@ -3,8 +3,12 @@ package com.chymaster.octopusagiledashboard.ui.settings
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.chymaster.octopusagiledashboard.core.util.Constants
+import com.chymaster.octopusagiledashboard.core.util.TariffCodes
+import com.chymaster.octopusagiledashboard.core.util.TariffNames
 import com.chymaster.octopusagiledashboard.data.prefs.UserPreferencesRepository
 import com.chymaster.octopusagiledashboard.data.repository.OctopusRepository
+import com.chymaster.octopusagiledashboard.data.repository.TariffScheduleRepository
+import com.chymaster.octopusagiledashboard.domain.model.TariffAgreement
 import com.chymaster.octopusagiledashboard.domain.usecase.TestConnectionUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -13,7 +17,16 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.time.Instant
 import javax.inject.Inject
+
+data class DetectedTariffUi(
+    val tariffCode: String,
+    val displayName: String,
+    val validFrom: Instant,
+    val validTo: Instant?,
+    val isCurrent: Boolean
+)
 
 data class SettingsUiState(
     val apiKey: String = "",
@@ -35,7 +48,12 @@ data class SettingsUiState(
     val accountNumber: String = "",
     val accountNumbers: List<String> = emptyList(),
     val isFetchingAccount: Boolean = false,
-    val accountFetchError: String? = null
+    val accountFetchError: String? = null,
+    // Tariff detection
+    val autoDetect: Boolean = true,
+    val detectedTariffs: List<DetectedTariffUi> = emptyList(),
+    val isDetecting: Boolean = false,
+    val detectError: String? = null
 ) {
     override fun toString(): String =
         "SettingsUiState(apiKey=***, mpan=$mpan, serialNumber=$serialNumber, gsp=$gsp, " +
@@ -43,7 +61,8 @@ data class SettingsUiState(
             "tariffCode=$tariffCode, isSaving=$isSaving, connectionTestState=$connectionTestState, " +
             "saveSuccess=$saveSuccess, error=$error, " +
             "serialNumbers=$serialNumbers, isFetchingSerials=$isFetchingSerials, serialFetchError=$serialFetchError, " +
-            "accountNumber=$accountNumber, accountNumbers=$accountNumbers, isFetchingAccount=$isFetchingAccount, accountFetchError=$accountFetchError)"
+            "accountNumber=$accountNumber, accountNumbers=$accountNumbers, isFetchingAccount=$isFetchingAccount, accountFetchError=$accountFetchError, " +
+            "autoDetect=$autoDetect, detectedTariffs=$detectedTariffs, isDetecting=$isDetecting, detectError=$detectError)"
 }
 
 sealed interface ConnectionTestState {
@@ -57,7 +76,8 @@ sealed interface ConnectionTestState {
 class SettingsViewModel @Inject constructor(
     private val preferencesRepository: UserPreferencesRepository,
     private val testConnectionUseCase: TestConnectionUseCase,
-    private val octopusRepository: OctopusRepository
+    private val octopusRepository: OctopusRepository,
+    private val tariffScheduleRepository: TariffScheduleRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
@@ -88,16 +108,30 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             preferencesRepository.gspFlow.collect { gsp ->
                 _uiState.value = _uiState.value.copy(gsp = gsp ?: Constants.DEFAULT_GSP)
+                updateTariffCode()
             }
         }
         viewModelScope.launch {
             preferencesRepository.productCodeFlow.collect { code ->
                 _uiState.value = _uiState.value.copy(productCode = code ?: Constants.DEFAULT_PRODUCT_CODE)
+                updateTariffCode()
             }
         }
         viewModelScope.launch {
             preferencesRepository.flexibleProductCodeFlow.collect { code ->
                 _uiState.value = _uiState.value.copy(flexibleProductCode = code ?: Constants.FLEXIBLE_PRODUCT_CODE)
+            }
+        }
+        viewModelScope.launch {
+            preferencesRepository.autoDetectTariffFlow.collect { enabled ->
+                _uiState.value = _uiState.value.copy(autoDetect = enabled)
+            }
+        }
+        viewModelScope.launch {
+            tariffScheduleRepository.detected.collect { agreements ->
+                _uiState.value = _uiState.value.copy(
+                    detectedTariffs = agreements.map { it.toDetectedUi() }
+                )
             }
         }
     }
@@ -235,9 +269,53 @@ class SettingsViewModel @Inject constructor(
     private fun updateTariffCode() {
         val state = _uiState.value
         val tariff = if (state.productCode.isNotBlank() && state.gsp.isNotBlank()) {
-            "E-1R-${state.productCode}-${state.gsp}"
+            TariffCodes.build(state.productCode, state.gsp)
         } else ""
         _uiState.value = _uiState.value.copy(tariffCode = tariff)
+    }
+
+    /** Turn account-based tariff detection on/off (off = manual override). */
+    fun onAutoDetectChange(enabled: Boolean) {
+        _uiState.value = _uiState.value.copy(autoDetect = enabled, detectError = null)
+        viewModelScope.launch {
+            preferencesRepository.saveAutoDetectTariff(enabled)
+            if (enabled) fetchDetectedTariffs()
+        }
+    }
+
+    /**
+     * Re-detect the tariff history from the Octopus account. Works even while
+     * the manual override is on, so the user can see what was detected.
+     */
+    fun fetchDetectedTariffs() {
+        if (_uiState.value.isDetecting) return
+        _uiState.value = _uiState.value.copy(isDetecting = true, detectError = null)
+        viewModelScope.launch {
+            val result = tariffScheduleRepository.detectNow()
+            val detected = tariffScheduleRepository.detected.value.map { it.toDetectedUi() }
+            _uiState.value = _uiState.value.copy(
+                isDetecting = false,
+                detectedTariffs = detected,
+                detectError = if (detected.isEmpty()) {
+                    result.exceptionOrNull()?.message
+                        ?: result.getOrNull()?.error
+                        ?: "No tariff history found — check your API key and MPAN."
+                } else {
+                    null
+                }
+            )
+        }
+    }
+
+    private fun TariffAgreement.toDetectedUi(): DetectedTariffUi {
+        val now = Instant.now()
+        return DetectedTariffUi(
+            tariffCode = tariffCode,
+            displayName = TariffNames.displayName(productCode),
+            validFrom = validFrom,
+            validTo = validTo,
+            isCurrent = !validFrom.isAfter(now) && (validTo == null || validTo.isAfter(now))
+        )
     }
 
     fun save() {
@@ -275,6 +353,11 @@ class SettingsViewModel @Inject constructor(
                 && updatedState.accountNumber.isBlank()
             ) {
                 fetchAccountNumbers()
+            }
+
+            // Detect the tariff history whenever detection is enabled.
+            if (updatedState.apiKey.isNotBlank() && updatedState.autoDetect) {
+                fetchDetectedTariffs()
             }
         }
     }
@@ -320,6 +403,9 @@ class SettingsViewModel @Inject constructor(
                 }
                 if (updatedState.accountNumber.isBlank()) {
                     fetchAccountNumbers()
+                }
+                if (updatedState.autoDetect) {
+                    fetchDetectedTariffs()
                 }
             }
         }

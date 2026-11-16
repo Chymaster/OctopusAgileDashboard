@@ -15,6 +15,14 @@ The app operates in one of two modes, determined automatically by whether the us
 
 Green energy data and the flexible tariff price are always fetched live from their respective APIs — they are not mode-dependent.
 
+### Tariff history
+
+Prices are no longer looked up for one globally configured product. The app
+detects the tariff history (the account's meter-point agreements) and prices each
+half-hour slot with the tariff that was in force then. See
+[`tariff-detection.md`](tariff-detection.md) for the schedule rules, the Room
+schema and the UI.
+
 ### Mode Tracking
 
 The single source of truth for demo mode is `UserPreferencesRepository.isDemoMode: Flow<Boolean>`, derived from `hasCredentials`:
@@ -103,9 +111,10 @@ Public Agile API → agilePriceDao.insertAll() → in-memory StateFlow → UI
 ```
 
 - Agile prices are managed directly by `OctopusRepositoryImpl` using an in-memory `MutableStateFlow<List<AgilePriceEntity>>` backed by Room.
+- Rows are keyed by `(validFrom, tariffCode)`; queries are tariff-scoped and the returned series is normalised to one rate per half-hour slot by `SlotRateSelector`.
 - Prices are **always fetched from the real Octopus public API** (unauthenticated), regardless of demo mode. The API requires no credentials.
-- Default tariff config (`AGILE-24-10-01` + GSP `_L`) is used when no credentials are set.
-- Supports `expandAgilePriceHistoryBackward()` for infinite scroll-up in the Future Prices screen.
+- Which product/tariff is fetched comes from the effective tariff schedule (`TariffScheduleRepository`) — the detected history, the manual override, the demo agreement, or the configured product code as a fallback.
+- Future Prices supports scroll-back by fetching older one-day windows.
 
 ### ConsumptionCacheStore (synthetic demo / real API)
 

@@ -179,7 +179,14 @@ fun FuturePricesScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Agile Prices") },
+                title = {
+                    Text(
+                        uiState.currentTariffName
+                            ?.takeUnless { it.contains("Agile", ignoreCase = true) }
+                            ?.let { "$it Prices" }
+                            ?: "Agile Prices"
+                    )
+                },
                 navigationIcon = {
                     IconButton(onClick = onOpenDrawer) {
                         Icon(Icons.Default.Menu, contentDescription = "Menu")

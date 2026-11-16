@@ -2,14 +2,21 @@ package com.chymaster.octopusagiledashboard.data.local.entity
 
 import androidx.room.Entity
 import androidx.room.Index
-import androidx.room.PrimaryKey
 
+/**
+ * One unit rate for one tariff. The key is `(validFrom, tariffCode)` so rates
+ * for several tariffs (a user's history) can be cached side by side.
+ */
 @Entity(
     tableName = "agile_prices",
-    indices = [Index(value = ["validFrom", "validTo"])]
+    primaryKeys = ["validFrom", "tariffCode"],
+    indices = [
+        Index(value = ["validFrom", "validTo"]),
+        Index(value = ["tariffCode"])
+    ]
 )
 data class AgilePriceEntity(
-    @PrimaryKey val validFrom: Long,  // epoch millis
+    val validFrom: Long,  // epoch millis
     val validTo: Long,
     val priceExcVat: Double,
     val priceIncVat: Double,
