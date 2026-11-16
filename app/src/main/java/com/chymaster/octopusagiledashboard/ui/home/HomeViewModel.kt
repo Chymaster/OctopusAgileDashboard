@@ -2,12 +2,15 @@ package com.chymaster.octopusagiledashboard.ui.home
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.chymaster.octopusagiledashboard.core.util.TariffNames
 import com.chymaster.octopusagiledashboard.data.prefs.UserPreferencesRepository
 import com.chymaster.octopusagiledashboard.data.repository.GreenEnergyRepository
 import com.chymaster.octopusagiledashboard.data.repository.OctopusRepository
+import com.chymaster.octopusagiledashboard.data.repository.TariffScheduleRepository
 import com.chymaster.octopusagiledashboard.domain.model.AgilePrice
 import com.chymaster.octopusagiledashboard.domain.model.GreenEnergyData
 import com.chymaster.octopusagiledashboard.domain.model.toUserMessage
+import com.chymaster.octopusagiledashboard.domain.tariff.TariffScheduleResolver
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -36,14 +39,17 @@ data class HomeUiState(
     val cheapThresholdPercent: Int = 70,
     val moderateThresholdPercent: Int = 130,
     val hasCredentials: Boolean = false,
-    val isDemoMode: Boolean = false
+    val isDemoMode: Boolean = false,
+    /** Tariff in force right now (labels the price gauge). */
+    val currentTariffName: String? = null
 )
 
 @HiltViewModel
 class HomeViewModel @Inject constructor(
     private val repository: OctopusRepository,
     private val greenEnergyRepository: GreenEnergyRepository,
-    private val preferencesRepository: UserPreferencesRepository
+    private val preferencesRepository: UserPreferencesRepository,
+    private val tariffScheduleRepository: TariffScheduleRepository
 ) : ViewModel() {
 
     private val londonZone = ZoneId.of("Europe/London")
@@ -57,6 +63,14 @@ class HomeViewModel @Inject constructor(
         viewModelScope.launch {
             preferencesRepository.isDemoMode.collect { isDemo ->
                 _uiState.update { it.copy(hasCredentials = !isDemo, isDemoMode = isDemo) }
+            }
+        }
+        viewModelScope.launch {
+            tariffScheduleRepository.state.collect { schedule ->
+                val current = TariffScheduleResolver.agreementAt(schedule.agreements, Instant.now())
+                _uiState.update {
+                    it.copy(currentTariffName = current?.productCode?.let(TariffNames::displayName))
+                }
             }
         }
         refreshJob = loadAllData()

@@ -11,5 +11,7 @@ data class HalfHourPoint(
     val intervalEnd: Instant,
     val priceIncVat: Double?,      // pence per kWh (null if no price data)
     val consumptionKwh: Double?,   // kWh (null if no consumption data)
-    val costIncVat: Double?        // pence (null if either price or consumption missing)
+    val costIncVat: Double?,       // pence (null if either price or consumption missing)
+    /** Tariff whose rate priced this interval (null when unknown). */
+    val tariffCode: String? = null
 )

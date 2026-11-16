@@ -1,5 +1,6 @@
 package com.chymaster.octopusagiledashboard.data.remote.api
 
+import com.chymaster.octopusagiledashboard.data.remote.dto.AccountDto
 import com.chymaster.octopusagiledashboard.data.remote.dto.AgileRateDto
 import com.chymaster.octopusagiledashboard.data.remote.dto.ConsumptionDto
 import com.chymaster.octopusagiledashboard.data.remote.dto.MeterPointDto
@@ -52,6 +53,15 @@ interface OctopusApiService {
     suspend fun getMeterPoint(
         @Path("mpan") mpan: String
     ): Response<MeterPointDto>
+
+    /**
+     * `GET /v1/accounts/{account_number}/` — authenticated. Used to resolve the
+     * meter point's tariff agreements (current and historical).
+     */
+    @GET("accounts/{accountNumber}/")
+    suspend fun getAccount(
+        @Path("accountNumber") accountNumber: String
+    ): Response<AccountDto>
 
     @GET("electricity-meter-points/{mpan}/meters/{serial}/consumption/")
     suspend fun getConsumption(

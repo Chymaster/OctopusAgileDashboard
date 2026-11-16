@@ -20,6 +20,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
@@ -91,8 +92,11 @@ fun CanvasBarChart(
     // Unit for the overlay value in the plain-bar tooltip (e.g. "kWh").
     // When null (the default) the tooltip omits the overlay value.
     usageUnitLabel: String? = null,
+    // Vertical markers (e.g. tariff changes) drawn as dashed lines on a bar.
+    markers: List<ChartMarker> = emptyList(),
 ) {
     val labelColor = MaterialTheme.colorScheme.onSurfaceVariant
+    val markerColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
 
     // Tapped bar index for tooltip
     var tappedIndex by remember { mutableStateOf<Int?>(null) }
@@ -244,6 +248,26 @@ fun CanvasBarChart(
                             end = Offset(chartRight, zeroY),
                             strokeWidth = 1.dp.toPx()
                         )
+                    }
+
+                    // Tariff-change markers — a dashed line at the first bar
+                    // priced with the new tariff.
+                    if (markers.isNotEmpty()) {
+                        val dash = PathEffect.dashPathEffect(
+                            floatArrayOf(6.dp.toPx(), 4.dp.toPx()),
+                            0f
+                        )
+                        for (marker in markers) {
+                            if (marker.barIndex !in bars.indices) continue
+                            val x = chartLeft + marker.barIndex * (barWidth + gap)
+                            drawLine(
+                                color = markerColor,
+                                start = Offset(x, chartTop),
+                                end = Offset(x, chartBottom),
+                                strokeWidth = 1.5.dp.toPx(),
+                                pathEffect = dash
+                            )
+                        }
                     }
 
                     // Draw bars

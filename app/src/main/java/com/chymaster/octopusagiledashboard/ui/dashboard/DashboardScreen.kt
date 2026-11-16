@@ -50,6 +50,8 @@ import com.chymaster.octopusagiledashboard.ui.components.ErrorState
 import com.chymaster.octopusagiledashboard.ui.components.PriceRangeCards
 import com.chymaster.octopusagiledashboard.ui.components.RangeSelector
 import com.chymaster.octopusagiledashboard.ui.components.SummaryCards
+import com.chymaster.octopusagiledashboard.ui.components.TariffChip
+import com.chymaster.octopusagiledashboard.ui.components.TariffRangeCaption
 import com.chymaster.octopusagiledashboard.ui.detail.CostBreakdownSheet
 import com.chymaster.octopusagiledashboard.ui.detail.DataPointDetailSheet
 import com.chymaster.octopusagiledashboard.ui.detail.UsageZoneBreakdownSheet
@@ -67,6 +69,9 @@ fun DashboardScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     var showDatePicker by remember { mutableStateOf(false) }
     var chartGroup by remember { mutableStateOf(ChartGroup.PRICE_USAGE) }
+    val switchInstants = remember(uiState.tariffSwitches) {
+        uiState.tariffSwitches.map { it.instant }
+    }
 
     // Use calendar-month binning for 6M and 1Y presets so each bar
     // represents a natural calendar month.
@@ -141,6 +146,13 @@ fun DashboardScreen(
                 onRangeSelected = viewModel::onRangeSelected,
                 onCustomRangeClick = { showDatePicker = true }
             )
+
+            // Tariff in force now, plus the tariffs covered by the range
+            TariffChip(
+                name = uiState.currentTariffName,
+                source = uiState.currentTariffSource
+            )
+            TariffRangeCaption(rangeTariffNames = uiState.rangeTariffNames)
 
             // Demo mode banner when credentials are not configured
             if (uiState.isDemoMode) {
@@ -279,6 +291,7 @@ fun DashboardScreen(
                                             modifier = Modifier.padding(horizontal = 8.dp),
                                             useCalendarMonthBinning = useCalendarMonthBinning,
                                             useCalendarDayBinning = useCalendarDayBinning,
+                                            switchInstants = switchInstants,
                                         )
                                         ChartGroup.COST -> PriceLineChart(
                                             points = uiState.displayChartPoints,
@@ -290,6 +303,7 @@ fun DashboardScreen(
                                             modifier = Modifier.padding(horizontal = 8.dp),
                                             useCalendarMonthBinning = useCalendarMonthBinning,
                                             useCalendarDayBinning = useCalendarDayBinning,
+                                            switchInstants = switchInstants,
                                         )
                                     }
                                     if (uiState.isChartLoading) {

@@ -13,6 +13,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.chymaster.octopusagiledashboard.domain.model.HalfHourPoint
 import com.chymaster.octopusagiledashboard.ui.theme.PriceColors
+import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -36,6 +37,7 @@ fun PriceUsageChart(
     modifier: Modifier = Modifier,
     useCalendarMonthBinning: Boolean = false,
     useCalendarDayBinning: Boolean = false,
+    switchInstants: List<Instant> = emptyList(),
 ) {
     if (points.isEmpty()) return
 
@@ -192,6 +194,9 @@ fun PriceUsageChart(
             usageYMin = priceYMin,
             usageYMax = priceYMax,
             usageLineColor = priceLineColor,
+            markers = remember(bars, switchInstants) {
+                buildChartMarkers(bars.map { it.intervalStart to it.intervalEnd }, switchInstants)
+            },
         )
     }
 }

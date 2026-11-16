@@ -6,6 +6,11 @@ plugins {
     alias(libs.plugins.hilt)
 }
 
+ksp {
+    // Export Room schemas so migrations can be validated against them.
+    arg("room.schemaLocation", "$projectDir/schemas")
+}
+
 android {
     namespace = "com.chymaster.octopusagiledashboard"
     compileSdk = 36
@@ -14,8 +19,8 @@ android {
         applicationId = "com.chymaster.octopusagiledashboard"
         minSdk = 26
         targetSdk = 36
-        versionCode = 8
-        versionName = "0.5.0"
+        versionCode = 9
+        versionName = "0.6.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

@@ -1,36 +1,40 @@
 package com.chymaster.octopusagiledashboard.domain.usecase
 
-import com.chymaster.octopusagiledashboard.core.util.Constants
+import com.chymaster.octopusagiledashboard.core.util.TariffCodes
+import com.chymaster.octopusagiledashboard.core.util.TariffNames
 import com.chymaster.octopusagiledashboard.data.prefs.UserPreferencesRepository
 import com.chymaster.octopusagiledashboard.data.repository.OctopusRepository
-import com.chymaster.octopusagiledashboard.domain.model.AgilePrice
+import com.chymaster.octopusagiledashboard.data.repository.TariffScheduleRepository
 import com.chymaster.octopusagiledashboard.domain.model.ApiError
 import com.chymaster.octopusagiledashboard.domain.model.DateRangeSelection
 import com.chymaster.octopusagiledashboard.domain.model.HalfHourPoint
-import com.chymaster.octopusagiledashboard.domain.model.StandingCharge
 import com.chymaster.octopusagiledashboard.domain.model.TariffComparison
 import com.chymaster.octopusagiledashboard.domain.model.TimeRangePreset
+import com.chymaster.octopusagiledashboard.domain.tariff.SlotRateSelector
+import com.chymaster.octopusagiledashboard.domain.tariff.TariffCostCalculator
+import com.chymaster.octopusagiledashboard.domain.tariff.TariffScheduleResolver
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.first
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
-import java.time.temporal.ChronoUnit
 import javax.inject.Inject
 
 /**
- * Compares the user's current tariff against a selected alternative over a
- * date range, computing per-slot usage costs (consumption × unit rate), the
- * Dashboard-style standing charge, and totals — plus the per-slot savings that
- * drive the comparison charts.
+ * Compares the user's **actual** tariff history against a selected alternative
+ * over a date range, computing per-slot usage costs (consumption × the unit rate
+ * of whichever tariff was in force in that slot), the Dashboard-style standing
+ * charge, and totals — plus the per-slot savings that drive the comparison
+ * charts.
  *
  * Costs are in pence. A positive [TariffComparison.totalSaving] means the
  * selected plan is cheaper.
  */
 class GetTariffComparisonUseCase @Inject constructor(
     private val repository: OctopusRepository,
-    private val preferencesRepository: UserPreferencesRepository
+    private val preferencesRepository: UserPreferencesRepository,
+    private val tariffScheduleRepository: TariffScheduleRepository
 ) {
 
     private val londonZone = ZoneId.of("Europe/London")
@@ -42,15 +46,19 @@ class GetTariffComparisonUseCase @Inject constructor(
     ): Result<TariffComparison> {
         return try {
             val (start, end) = getDateRange(selection)
-            val cfg = preferencesRepository.tariffConfig.first()
-            val currentProductCode = cfg.productCode
-            // Same tariff-code pattern as fetchFlexiblePrice: E-1R-<product>-<gsp>.
-            val selectedTariffCode = "E-1R-$selectedProductCode-${cfg.gsp.removePrefix("_")}"
-            val currentName = Constants.COMMON_TARIFFS
-                .firstOrNull { it.id == currentProductCode }?.displayName
-                ?: currentProductCode
+            val schedule = tariffScheduleRepository.get()
+            val segments = TariffScheduleResolver.clipToRange(schedule, start, end)
+
+            val gsp = preferencesRepository.gspFlow.first()
+                ?: com.chymaster.octopusagiledashboard.core.util.Constants.DEFAULT_GSP
+            val selectedTariffCode = TariffCodes.build(selectedProductCode, gsp)
+
+            val currentProductCodes = TariffScheduleResolver.distinctProductCodes(segments)
+            val currentNames = currentProductCodes.map { TariffNames.displayName(it) }
+            val currentName = TariffNames.joinedDisplayName(currentProductCodes)
 
             coroutineScope {
+                // Already normalised to one rate per slot by the repository.
                 val currentPricesDeferred = async { repository.getAgilePrices(start, end) }
                 val consumptionDeferred = async { repository.getConsumption(start, end) }
                 val currentChargesDeferred = async {
@@ -95,12 +103,17 @@ class GetTariffComparisonUseCase @Inject constructor(
 
                 if (currentPrices.isEmpty()) {
                     return@coroutineScope Result.failure(
-                        ApiError.NoDataError("No rate data available for your current tariff in the selected range.")
+                        ApiError.NoDataError(
+                            "No rate data available for your tariff history in the selected range."
+                        )
                     )
                 }
                 if (selectedRates.isEmpty()) {
                     return@coroutineScope Result.failure(
-                        ApiError.NoDataError("No rate data available for $selectedTariffName in your region for the selected range.")
+                        ApiError.NoDataError(
+                            "No rate data available for $selectedTariffName in your region " +
+                                "for the selected range."
+                        )
                     )
                 }
                 if (consumption.isEmpty()) {
@@ -109,8 +122,9 @@ class GetTariffComparisonUseCase @Inject constructor(
                     )
                 }
 
-                val currentBySlot = buildSlotPriceMap(currentPrices, start, end)
-                val selectedBySlot = buildSlotPriceMap(selectedRates, start, end)
+                // Current side is slot-normalised across the tariff history.
+                val currentBySlot = currentPrices.associate { it.validFrom.toEpochMilli() to it.priceIncVat }
+                val selectedBySlot = SlotRateSelector.buildSlotPriceMap(selectedRates, start, end)
 
                 var usageCurrent = 0.0
                 var usageSelected = 0.0
@@ -139,8 +153,18 @@ class GetTariffComparisonUseCase @Inject constructor(
                 }
                 savings.sortBy { it.intervalStart }
 
-                val standingCurrent = standingChargeCost(currentCharges, start, end)
-                val standingSelected = standingChargeCost(selectedCharges, start, end)
+                val days = TariffCostCalculator.dayStarts(start, end)
+                val standingCurrent = TariffCostCalculator.standingChargeCost(
+                    charges = currentCharges,
+                    dayStarts = days,
+                    tariffAt = { day ->
+                        segments.lastOrNull { !day.isBefore(it.start) && day.isBefore(it.end) }
+                            ?.tariffCode
+                    }
+                )
+                val standingSelected =
+                    TariffCostCalculator.standingChargeCostForSingleTariff(selectedCharges, days)
+
                 val hasComparison = compared > 0
                 val totalCurrent = if (hasComparison) usageCurrent + (standingCurrent ?: 0.0) else null
                 val totalSelected = if (hasComparison) usageSelected + (standingSelected ?: 0.0) else null
@@ -148,6 +172,7 @@ class GetTariffComparisonUseCase @Inject constructor(
                 Result.success(
                     TariffComparison(
                         currentTariffName = currentName,
+                        currentTariffNames = currentNames,
                         selectedTariffName = selectedTariffName,
                         rangeStart = start,
                         rangeEnd = end,
@@ -172,46 +197,6 @@ class GetTariffComparisonUseCase @Inject constructor(
         } catch (e: Exception) {
             Result.failure(e)
         }
-    }
-
-    /**
-     * Maps every half-hour slot in [start]..[end) to the unit rate in effect at
-     * that time. A rate applies from its [AgilePrice.validFrom] until the next
-     * rate's validFrom (open-ended for Flexible-like tariffs), so we use the
-     * "last rate with validFrom ≤ slot" rule rather than keying on validFrom.
-     * This handles per-slot Agile rates, multi-rate Cosy/Go and long-lived
-     * Flexible rates alike.
-     */
-    private fun buildSlotPriceMap(
-        rates: List<AgilePrice>,
-        start: Instant,
-        end: Instant
-    ): Map<Long, Double> {
-        val sorted = rates.sortedBy { it.validFrom }
-        val map = HashMap<Long, Double>()
-        var idx = -1
-        var t = start
-        while (t.isBefore(end)) {
-            while (idx + 1 < sorted.size && !sorted[idx + 1].validFrom.isAfter(t)) idx++
-            if (idx >= 0) map[t.toEpochMilli()] = sorted[idx].priceIncVat
-            t = t.plus(30, ChronoUnit.MINUTES)
-        }
-        return map
-    }
-
-    /** Dashboard-style standing charge: most-recent applicable value × calendar days. */
-    private fun standingChargeCost(
-        charges: List<StandingCharge>,
-        start: Instant,
-        end: Instant
-    ): Double? {
-        if (charges.isEmpty()) return null
-        val charge = charges.maxByOrNull { it.validFrom } ?: return null
-        val days = ChronoUnit.DAYS.between(
-            start.atZone(londonZone).toLocalDate(),
-            end.atZone(londonZone).toLocalDate()
-        ).coerceAtLeast(1)
-        return charge.valueIncVat * days
     }
 
     /** Maps a date-range selection to [start, end) Instants (mirrors DashboardViewModel). */

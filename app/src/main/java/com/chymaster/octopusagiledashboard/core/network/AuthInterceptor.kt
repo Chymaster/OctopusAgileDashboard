@@ -23,7 +23,8 @@ class AuthInterceptor @Inject constructor(
         // reject requests with invalid credentials, causing 401 errors.
         val path = original.url.encodedPath
         val needsAuth = path.contains("/electricity-meter-points/") ||
-                path.contains("/consumption/")
+                path.contains("/consumption/") ||
+                path.contains("/accounts/")
 
         if (needsAuth) {
             val apiKey = runBlocking { preferencesRepository.apiKeyFlow.first() }

@@ -2,12 +2,16 @@ package com.chymaster.octopusagiledashboard.ui.dashboard
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.chymaster.octopusagiledashboard.core.util.TariffNames
 import com.chymaster.octopusagiledashboard.data.prefs.UserPreferencesRepository
 import com.chymaster.octopusagiledashboard.data.repository.OctopusRepository
+import com.chymaster.octopusagiledashboard.data.repository.TariffScheduleRepository
 import com.chymaster.octopusagiledashboard.domain.model.DateRangeSelection
 import com.chymaster.octopusagiledashboard.domain.model.HalfHourPoint
-import com.chymaster.octopusagiledashboard.domain.model.StandingCharge
+import com.chymaster.octopusagiledashboard.domain.model.TariffSchedule
+import com.chymaster.octopusagiledashboard.domain.model.TariffSource
 import com.chymaster.octopusagiledashboard.domain.model.toUserMessage
+import com.chymaster.octopusagiledashboard.domain.tariff.TariffScheduleResolver
 import com.chymaster.octopusagiledashboard.ui.chart.BinnedPoint
 import com.chymaster.octopusagiledashboard.ui.chart.trimMissingConsumption
 import com.chymaster.octopusagiledashboard.domain.model.TimeRangePreset
@@ -24,6 +28,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.update
@@ -32,6 +37,13 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import javax.inject.Inject
+
+data class TariffSwitchUi(
+    /** Instant the new tariff took effect. */
+    val instant: Instant,
+    /** Display name of the tariff that took effect. */
+    val toName: String
+)
 
 data class DashboardUiState(
     val isLoading: Boolean = true,
@@ -51,6 +63,14 @@ data class DashboardUiState(
     val selectedBinnedPoint: BinnedPoint? = null,
     val hasCredentials: Boolean = false,
     val isDemoMode: Boolean = false,
+    // Tariff history
+    /** Tariff in force right now, e.g. "Cosy Octopus". */
+    val currentTariffName: String? = null,
+    val currentTariffSource: TariffSource? = null,
+    /** Distinct tariff names in force over the selected range. */
+    val rangeTariffNames: List<String> = emptyList(),
+    /** Points in the range where the tariff changed. */
+    val tariffSwitches: List<TariffSwitchUi> = emptyList(),
     // Summary stats
     val totalCost: Double? = null,
     val usageCost: Double? = null,
@@ -82,7 +102,8 @@ class DashboardViewModel @Inject constructor(
     private val getDashboardDataUseCase: GetDashboardDataUseCase,
     private val refreshDashboardDataUseCase: RefreshDashboardDataUseCase,
     private val repository: OctopusRepository,
-    private val preferencesRepository: UserPreferencesRepository
+    private val preferencesRepository: UserPreferencesRepository,
+    private val tariffScheduleRepository: TariffScheduleRepository
 ) : ViewModel() {
 
     private val londonZone = ZoneId.of("Europe/London")
@@ -114,6 +135,15 @@ class DashboardViewModel @Inject constructor(
                 recomputeZoneBreakdown()
             }
         }
+        // Tariff history for the chip and the chart switch markers.
+        viewModelScope.launch {
+            combine(tariffScheduleRepository.state, _selectedRange) { schedule, range ->
+                schedule to range
+            }.collect { (schedule, range) ->
+                val (start, end) = getDateRange(range)
+                applyTariffSchedule(schedule, start, end)
+            }
+        }
         // Single data-loading pipeline. flatMapLatest cancels the previous
         // inner flow when the range changes, so stale emissions from old
         // ranges never reach the collector — no epoch counter needed.
@@ -131,10 +161,8 @@ class DashboardViewModel @Inject constructor(
                             }
                         }
                         launch {
-                            repository.observeStandingCharges(start, end).collectLatest { charges ->
-                                _uiState.update {
-                                    it.copy(standingChargeCost = computeStandingChargeCost(charges, start, end))
-                                }
+                            repository.observeStandingChargeTotal(start, end).collectLatest { total ->
+                                _uiState.update { it.copy(standingChargeCost = total) }
                                 recalculateTotalCost()
                             }
                         }
@@ -382,24 +410,32 @@ class DashboardViewModel @Inject constructor(
     }
 
     /**
-     * Compute the total standing charge cost (in pence) for the given date range.
-     * Standing charges are in pence per day; we find the applicable charge and
-     * multiply by the number of calendar days covered. Works for both real
-     * (50p/day from the API) and demo (50p/day from the synthetic entity) data.
+     * Resolve the tariff in force now and the tariffs/markers for the selected
+     * range from the effective schedule.
      */
-    private fun computeStandingChargeCost(
-        charges: List<StandingCharge>,
-        start: Instant,
-        end: Instant
-    ): Double? {
-        if (charges.isEmpty()) return null
-        // Use the most recent applicable standing charge
-        val charge = charges.maxByOrNull { it.validFrom } ?: return null
-        val days = ChronoUnit.DAYS.between(
-            start.atZone(londonZone).toLocalDate(),
-            end.atZone(londonZone).toLocalDate()
-        ).coerceAtLeast(1)
-        return charge.valueIncVat * days
+    private fun applyTariffSchedule(schedule: TariffSchedule, start: Instant, end: Instant) {
+        val segments = TariffScheduleResolver.clipToRange(schedule, start, end)
+        val current = TariffScheduleResolver.agreementAt(schedule.agreements, Instant.now())
+        val rangeNames = TariffScheduleResolver
+            .distinctProductCodes(segments)
+            .map { TariffNames.displayName(it) }
+        val switches = TariffScheduleResolver.switchInstants(segments, start, end)
+            .map { instant ->
+                val segment = segments.firstOrNull { !it.start.isBefore(instant) }
+                TariffSwitchUi(
+                    instant = instant,
+                    toName = segment?.productCode?.let(TariffNames::displayName) ?: ""
+                )
+            }
+
+        _uiState.update {
+            it.copy(
+                currentTariffName = current?.productCode?.let(TariffNames::displayName),
+                currentTariffSource = schedule.source,
+                rangeTariffNames = rangeNames,
+                tariffSwitches = switches
+            )
+        }
     }
 
     /**

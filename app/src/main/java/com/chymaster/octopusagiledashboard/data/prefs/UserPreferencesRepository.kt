@@ -3,6 +3,7 @@ package com.chymaster.octopusagiledashboard.data.prefs
 import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.doublePreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
@@ -10,6 +11,7 @@ import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.chymaster.octopusagiledashboard.core.util.Constants
+import com.chymaster.octopusagiledashboard.core.util.TariffCodes
 import com.chymaster.octopusagiledashboard.data.repository.OctopusRepository
 import com.chymaster.octopusagiledashboard.domain.model.TariffConfig
 import dagger.Lazy
@@ -48,6 +50,16 @@ class UserPreferencesRepository @Inject constructor(
         val ACCOUNT_NUMBER = stringPreferencesKey("account_number")
         val CHEAP_THRESHOLD_PERCENT = intPreferencesKey("cheap_threshold_percent")
         val MODERATE_THRESHOLD_PERCENT = intPreferencesKey("moderate_threshold_percent")
+
+        // ── Tariff detection ────────────────────────────────────────
+        /** When true (default) the tariff history is detected from the account. */
+        val AUTO_DETECT_TARIFF = booleanPreferencesKey("auto_detect_tariff")
+        /** Persisted JSON of the last successful detection. */
+        val TARIFF_SCHEDULE_JSON = stringPreferencesKey("tariff_schedule_json")
+        val TARIFF_SCHEDULE_FETCHED_AT = longPreferencesKey("tariff_schedule_fetched_at")
+        /** Identity the persisted schedule was detected for. */
+        val TARIFF_SCHEDULE_MPAN = stringPreferencesKey("tariff_schedule_mpan")
+        val TARIFF_SCHEDULE_ACCOUNT = stringPreferencesKey("tariff_schedule_account")
     }
 
     /**
@@ -89,9 +101,56 @@ class UserPreferencesRepository @Inject constructor(
         val effectiveGsp = gsp?.takeIf { it.isNotBlank() } ?: Constants.DEFAULT_GSP
         TariffConfig(
             productCode = effectiveProduct,
-            tariffCode = "E-1R-$effectiveProduct-${effectiveGsp.removePrefix("_")}",
+            tariffCode = TariffCodes.build(effectiveProduct, effectiveGsp),
             gsp = effectiveGsp
         )
+    }
+
+    // ── Tariff detection ────────────────────────────────────────────
+
+    /** Whether the tariff history is detected from the account (default true). */
+    val autoDetectTariffFlow: Flow<Boolean> = dataStore.data.map { it[AUTO_DETECT_TARIFF] ?: true }
+
+    /** JSON of the last successful detection, or null if never detected. */
+    val tariffScheduleJsonFlow: Flow<String?> = dataStore.data.map { it[TARIFF_SCHEDULE_JSON] }
+
+    /** Epoch millis of the last successful detection, or 0. */
+    val tariffScheduleFetchedAtFlow: Flow<Long> =
+        dataStore.data.map { it[TARIFF_SCHEDULE_FETCHED_AT] ?: 0L }
+
+    /** The MPAN/account the persisted schedule was detected for. */
+    val tariffScheduleIdentityFlow: Flow<Pair<String?, String?>> =
+        dataStore.data.map { it[TARIFF_SCHEDULE_MPAN] to it[TARIFF_SCHEDULE_ACCOUNT] }
+
+    suspend fun saveAutoDetectTariff(enabled: Boolean) {
+        dataStore.edit { it[AUTO_DETECT_TARIFF] = enabled }
+    }
+
+    suspend fun saveTariffSchedule(
+        json: String,
+        fetchedAt: Long,
+        mpan: String?,
+        accountNumber: String?
+    ) {
+        dataStore.edit { prefs ->
+            prefs[TARIFF_SCHEDULE_JSON] = json
+            prefs[TARIFF_SCHEDULE_FETCHED_AT] = fetchedAt
+            if (mpan != null) prefs[TARIFF_SCHEDULE_MPAN] = mpan else prefs.remove(TARIFF_SCHEDULE_MPAN)
+            if (accountNumber != null) {
+                prefs[TARIFF_SCHEDULE_ACCOUNT] = accountNumber
+            } else {
+                prefs.remove(TARIFF_SCHEDULE_ACCOUNT)
+            }
+        }
+    }
+
+    suspend fun clearTariffSchedule() {
+        dataStore.edit { prefs ->
+            prefs.remove(TARIFF_SCHEDULE_JSON)
+            prefs.remove(TARIFF_SCHEDULE_FETCHED_AT)
+            prefs.remove(TARIFF_SCHEDULE_MPAN)
+            prefs.remove(TARIFF_SCHEDULE_ACCOUNT)
+        }
     }
 
     suspend fun saveApiKey(apiKey: String) {

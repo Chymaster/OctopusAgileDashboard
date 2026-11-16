@@ -32,7 +32,9 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -49,6 +51,16 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.chymaster.octopusagiledashboard.core.util.Constants
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.util.Locale
+
+/** UK date format used by the detected-tariff list. */
+private val tariffDateFormatter: DateTimeFormatter =
+    DateTimeFormatter.ofPattern("d MMM yyyy", Locale.UK).withZone(ZoneId.of("Europe/London"))
+
+private fun formatDate(instant: Instant): String = tariffDateFormatter.format(instant)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -344,19 +356,33 @@ fun SettingsScreen(
                 }
                 // No API key saved yet — disabled placeholder
                 else -> {
-                    OutlinedTextField(
-                        value = "",
-                        onValueChange = {},
-                        readOnly = true,
-                        label = { Text("Account Number") },
-                        placeholder = { Text("Auto-fetched after save") },
-                        modifier = Modifier.fillMaxWidth(),
-                        enabled = false,
-                        supportingText = {
-                            Text("Save your API key to auto-populate")
-                        },
-                        singleLine = true
-                    )
+                    if (uiState.accountNumber.isNotBlank()) {
+                        OutlinedTextField(
+                            value = uiState.accountNumber,
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("Account Number") },
+                            modifier = Modifier.fillMaxWidth(),
+                            supportingText = {
+                                Text("Detected from your API key")
+                            },
+                            singleLine = true
+                        )
+                    } else {
+                        OutlinedTextField(
+                            value = "",
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("Account Number") },
+                            placeholder = { Text("Auto-fetched after save") },
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = false,
+                            supportingText = {
+                                Text("Save your API key to auto-populate")
+                            },
+                            singleLine = true
+                        )
+                    }
                 }
             }
 
@@ -392,11 +418,111 @@ fun SettingsScreen(
                 }
             }
 
-            // Product Code
+            // ── Tariff detection ──────────────────────────────────────
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Text(
+                text = "Tariff",
+                style = MaterialTheme.typography.titleMedium
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(text = "Detect my tariff automatically")
+                    Text(
+                        text = "Reads your tariff history (including past switches) from your account.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = uiState.autoDetect,
+                    onCheckedChange = viewModel::onAutoDetectChange
+                )
+            }
+
+            if (uiState.autoDetect) {
+                when {
+                    uiState.isDetecting -> {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            CircularProgressIndicator(modifier = Modifier.height(16.dp))
+                            Spacer(modifier = Modifier.padding(4.dp))
+                            Text(
+                                text = "Detecting…",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    uiState.detectedTariffs.isNotEmpty() -> {
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            uiState.detectedTariffs.forEach { tariff ->
+                                Text(
+                                    text = buildString {
+                                        append(tariff.displayName)
+                                        append(" · ")
+                                        append(formatDate(tariff.validFrom))
+                                        append(" – ")
+                                        append(
+                                            if (tariff.isCurrent) "current"
+                                            else tariff.validTo?.let(::formatDate) ?: "now"
+                                        )
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (tariff.isCurrent) {
+                                        MaterialTheme.colorScheme.primary
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    else -> {
+                        Text(
+                            text = "No tariff detected yet — add your API key and MPAN, " +
+                                "then tap Detect again.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                uiState.detectError?.let { message ->
+                    Text(
+                        text = message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+
+                TextButton(onClick = viewModel::fetchDetectedTariffs) {
+                    Text("Detect again")
+                }
+            } else {
+                Text(
+                    text = "Manual override: your whole history will be priced with the " +
+                        "product code below, whatever you were actually on at the time.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
+
+            // Product Code — the fallback (auto) or the override (manual)
             OutlinedTextField(
                 value = uiState.productCode,
                 onValueChange = viewModel::onProductCodeChange,
-                label = { Text("Product Code") },
+                label = {
+                    Text(
+                        if (uiState.autoDetect) "Fallback product code"
+                        else "Manual override product code"
+                    )
+                },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true
             )

@@ -3,6 +3,7 @@ package com.chymaster.octopusagiledashboard.core.di
 import android.content.Context
 import androidx.room.Room
 import com.chymaster.octopusagiledashboard.data.local.OctopusDatabase
+import com.chymaster.octopusagiledashboard.data.local.OctopusMigrations
 import com.chymaster.octopusagiledashboard.data.local.dao.AgilePriceDao
 import com.chymaster.octopusagiledashboard.data.local.dao.ConsumptionDao
 import com.chymaster.octopusagiledashboard.data.local.dao.StandingChargeDao
@@ -24,7 +25,10 @@ object DatabaseModule {
             context,
             OctopusDatabase::class.java,
             "octopus_database"
-        ).fallbackToDestructiveMigration(dropAllTables = true).build()
+        )
+            .addMigrations(OctopusMigrations.MIGRATION_2_3)
+            .fallbackToDestructiveMigration(dropAllTables = true)
+            .build()
     }
 
     @Provides

@@ -43,7 +43,8 @@ fun PriceGauge(
     referencePrice: Double?,
     cheapPercent: Int = PriceColors.DEFAULT_CHEAP_PERCENT,
     moderatePercent: Int = PriceColors.DEFAULT_MODERATE_PERCENT,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    label: String = "Price"
 ) {
     val labelColor = MaterialTheme.colorScheme.onSurfaceVariant
     val needleColor = MaterialTheme.colorScheme.primary
@@ -83,7 +84,7 @@ fun PriceGauge(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
-            text = "Agile Price",
+            text = label,
             style = MaterialTheme.typography.labelMedium,
             color = labelColor
         )
