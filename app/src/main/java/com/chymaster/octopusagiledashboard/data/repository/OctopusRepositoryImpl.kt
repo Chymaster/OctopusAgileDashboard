@@ -25,6 +25,7 @@ import com.chymaster.octopusagiledashboard.domain.model.HalfHourPoint
 import com.chymaster.octopusagiledashboard.domain.model.StandingCharge
 import com.chymaster.octopusagiledashboard.domain.model.TariffOption
 import com.chymaster.octopusagiledashboard.domain.model.TariffSegment
+import com.chymaster.octopusagiledashboard.domain.tariff.RateCoverage
 import com.chymaster.octopusagiledashboard.domain.tariff.SlotRateSelector
 import com.chymaster.octopusagiledashboard.domain.tariff.TariffScheduleResolver
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -261,6 +262,35 @@ class OctopusRepositoryImpl @Inject constructor(
     }
 
     /**
+     * True when the tariff's published rates run one per half-hour slot.
+     * Such a series needs every slot present; a daily / multi-period series
+     * legitimately has far fewer rows.
+     */
+    private fun isHalfHourlySeries(rows: List<AgilePriceEntity>): Boolean =
+        rows.isNotEmpty() && rows.all { it.validTo - it.validFrom <= 2 * HALF_HOUR_MILLIS }
+
+    /**
+     * True when [rows] fully describe their tariff's rates up to [endMs]:
+     * every half-hour slot for a slot-by-slot series, or an unbroken run of
+     * price periods reaching the window end for a daily / multi-period one.
+     */
+    private fun ratesCoverWindow(
+        rows: List<AgilePriceEntity>,
+        endMs: Long,
+        expectedCount: Int
+    ): Boolean {
+        if (rows.isEmpty()) return false
+        return if (isHalfHourlySeries(rows)) {
+            rows.size >= expectedCount
+        } else {
+            RateCoverage.tilesThrough(
+                rows.map { RateCoverage.Period(it.validFrom, it.validTo) },
+                endMs
+            )
+        }
+    }
+
+    /**
      * Makes sure the rates for [segment]'s tariff are cached over the segment
      * (plus the lookback), fetching only when coverage is missing.
      */
@@ -315,39 +345,46 @@ class OctopusRepositoryImpl @Inject constructor(
             }
 
             val expectedCount = ((endMs - startMs) / HALF_HOUR_MILLIS).toInt()
-            val sample = agilePriceDao.queryRangeForTariff(tariffCode, startMs, endMs)
-            val actualCount = sample.size
-            // A tariff that publishes one rate per half-hour needs every slot;
-            // a daily/fixed tariff legitimately has far fewer rows, so its
-            // "missing" slots are not gaps.
-            val isHalfHourlySeries = sample.isNotEmpty() && sample.all {
-                it.validTo - it.validFrom <= 2 * HALF_HOUR_MILLIS
+            if (expectedCount <= 0) {
+                priceCoverage[tariffCode] = Coverage(fetchStart, fetchEnd, now)
+                return@withLock Result.success(Unit)
             }
 
+            val sample = agilePriceDao.queryRangeForTariff(tariffCode, startMs, endMs)
+            val halfHourly = isHalfHourlySeries(sample)
+
             val result = when {
-                expectedCount <= 0 -> Result.success(Unit)
-                actualCount >= expectedCount -> Result.success(Unit)
-                actualCount == 0 -> fetchAndPersistAgilePrices(
+                ratesCoverWindow(sample, endMs, expectedCount) -> Result.success(Unit)
+                sample.isEmpty() -> fetchAndPersistAgilePrices(
                     productCode = segment.productCode,
                     tariffCode = tariffCode,
                     start = fetchStart,
                     end = fetchEnd
                 )
-                !isHalfHourlySeries -> Result.success(Unit)
-                else -> {
-                    // Partial half-hourly data — fill only the missing blocks.
+                // Partial half-hourly data — fill only the missing blocks.
+                halfHourly -> {
                     fillAgilePriceGaps(segment.productCode, tariffCode, fetchStart, fetchEnd)
                     Result.success(Unit)
                 }
+                // A daily/multi-period tariff whose cached periods stop before
+                // the window end: Octopus publishes future periods in batches,
+                // so refetch the window. Rows are replaced on (validFrom,
+                // tariffCode), so a refetch never duplicates them.
+                else -> fetchAndPersistAgilePrices(
+                    productCode = segment.productCode,
+                    tariffCode = tariffCode,
+                    start = fetchStart,
+                    end = fetchEnd
+                )
             }
 
             // Only claim coverage when the window really is complete; otherwise
             // remember the attempt purely to throttle the next retry.
-            val complete = if (isHalfHourlySeries) {
-                agilePriceDao.countInRangeForTariff(tariffCode, startMs, endMs) >= expectedCount
-            } else {
-                true
-            }
+            val complete = ratesCoverWindow(
+                agilePriceDao.queryRangeForTariff(tariffCode, startMs, endMs),
+                endMs,
+                expectedCount
+            )
             priceCoverage[tariffCode] = if (result.isSuccess && complete) {
                 Coverage(fetchStart, fetchEnd, now)
             } else {

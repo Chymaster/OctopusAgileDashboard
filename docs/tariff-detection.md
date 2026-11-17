@@ -64,9 +64,18 @@ never read.
 
 `getAgilePrices(start, end)` clips the schedule to the range and, per segment
 (per tariff), loads rates with the tiered strategy: in-memory coverage → Room
-count → API. Rates are fetched over `[segment.start − 25 h, segment.end)` so a
-daily rate that started before the range still prices its first slot, and are
+coverage → API. Rates are fetched over `[segment.start − 25 h, segment.end)` so
+a daily rate that started before the range still prices its first slot, and are
 stored keyed by `(validFrom, tariffCode)`.
+
+Room coverage is judged per tariff shape. A half-hourly series (Agile) is
+complete when every slot is present. A daily / multi-period series (Cosy,
+Flexible) instead has to **tile the window with no gap** up to its end
+(`RateCoverage.tilesThrough`) — counting rows says nothing there, and Octopus
+publishes future periods in batches. Treating "some rows exist" as complete
+would freeze the newest days on whatever period happened to be published last
+(e.g. Cosy showing its standard rate all day, with no Cosy or peak windows), so
+a window whose periods stop early is refetched.
 
 The returned series is **normalised to one rate per half-hour slot**
 (`SlotRateSelector.selectSlotRates`), carrying the tariff code that produced it.
