@@ -59,10 +59,5 @@ Plan ahead with a full price schedule up to 2 days in the future. Prices are gro
 
 ## What's new
 
-• Automatically detects the tariff you're on — and your past tariffs — from your Octopus account
-• Dashboard costs now use the tariff that was actually in force at each half-hour, so a range that spans a tariff switch is priced correctly
-• Tariff switch points are marked on the Dashboard chart, and the screen shows your current tariff and the tariffs in range
-• Tariff Comparison now compares your real tariff history against another tariff
-• Home and Future Prices are labelled with your detected tariff instead of always saying "Agile"
-• Settings shows your detected tariff history, with a manual override switch
-• Security: the API key and login tokens are no longer written to the device log in plain text
+• Fixes Future Prices showing a flat standard rate (no peak or off-peak windows) on Cosy and other multi-rate tariffs, for days after a tariff switch
+• Future Prices now reloads newly published prices for daily and multi-period tariffs as soon as Octopus releases them
