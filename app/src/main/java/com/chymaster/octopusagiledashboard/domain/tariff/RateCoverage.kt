@@ -1,7 +1,7 @@
 package com.chymaster.octopusagiledashboard.domain.tariff
 
 /**
- * Decides whether cached rate rows fully describe a time window.
+ * Decides what has to be loaded for a window of cached rate rows.
  *
  * Agile-style tariffs publish exactly one row per half-hour slot, so their
  * coverage can be checked by counting rows. Cosy / Flexible-style tariffs
@@ -20,6 +20,46 @@ object RateCoverage {
 
     /** One rate row's validity window, in epoch millis. */
     data class Period(val start: Long, val end: Long)
+
+    /** What still has to be fetched for a window, given the rows already cached. */
+    enum class Load {
+        /** The cached rows cover the whole window. */
+        NONE,
+
+        /** Fetch the whole window — the cached rows are missing a tail or have a hole. */
+        FETCH_WINDOW,
+
+        /** A slot-by-slot series with some slots missing — fetch just the gaps. */
+        FILL_GAPS
+    }
+
+    /**
+     * Chooses the fetch needed so [periods] describe the tariff's rates up to
+     * [endMillis].
+     *
+     * @param expectedSlotCount half-hour slots in the window.
+     */
+    fun plan(
+        periods: List<Period>,
+        endMillis: Long,
+        expectedSlotCount: Int,
+        slotMillis: Long = TariffScheduleResolver.SLOT_MILLIS
+    ): Load {
+        if (expectedSlotCount <= 0) return Load.NONE
+        if (periods.isEmpty()) return Load.FETCH_WINDOW
+        return if (isSlotBySlotSeries(periods, slotMillis)) {
+            val distinctSlots = periods.map { it.start }.distinct().size
+            if (distinctSlots >= expectedSlotCount) Load.NONE else Load.FILL_GAPS
+        } else {
+            if (tilesThrough(periods, endMillis)) Load.NONE else Load.FETCH_WINDOW
+        }
+    }
+
+    /** True when every row is about one slot long — an Agile-style series. */
+    fun isSlotBySlotSeries(
+        periods: List<Period>,
+        slotMillis: Long = TariffScheduleResolver.SLOT_MILLIS
+    ): Boolean = periods.isNotEmpty() && periods.all { it.end - it.start <= 2 * slotMillis }
 
     /**
      * True when [periods] leave no gap between the first published period and

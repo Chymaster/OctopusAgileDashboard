@@ -262,33 +262,19 @@ class OctopusRepositoryImpl @Inject constructor(
     }
 
     /**
-     * True when the tariff's published rates run one per half-hour slot.
-     * Such a series needs every slot present; a daily / multi-period series
-     * legitimately has far fewer rows.
+     * What still has to be fetched so [rows] describe their tariff's rates up
+     * to [endMs]. Shapes the fetch decision only — see [RateCoverage.plan].
      */
-    private fun isHalfHourlySeries(rows: List<AgilePriceEntity>): Boolean =
-        rows.isNotEmpty() && rows.all { it.validTo - it.validFrom <= 2 * HALF_HOUR_MILLIS }
-
-    /**
-     * True when [rows] fully describe their tariff's rates up to [endMs]:
-     * every half-hour slot for a slot-by-slot series, or an unbroken run of
-     * price periods reaching the window end for a daily / multi-period one.
-     */
-    private fun ratesCoverWindow(
+    private fun loadPlan(
         rows: List<AgilePriceEntity>,
         endMs: Long,
         expectedCount: Int
-    ): Boolean {
-        if (rows.isEmpty()) return false
-        return if (isHalfHourlySeries(rows)) {
-            rows.size >= expectedCount
-        } else {
-            RateCoverage.tilesThrough(
-                rows.map { RateCoverage.Period(it.validFrom, it.validTo) },
-                endMs
-            )
-        }
-    }
+    ): RateCoverage.Load =
+        RateCoverage.plan(
+            rows.map { RateCoverage.Period(it.validFrom, it.validTo) },
+            endMs,
+            expectedCount
+        )
 
     /**
      * Makes sure the rates for [segment]'s tariff are cached over the segment
@@ -351,40 +337,33 @@ class OctopusRepositoryImpl @Inject constructor(
             }
 
             val sample = agilePriceDao.queryRangeForTariff(tariffCode, startMs, endMs)
-            val halfHourly = isHalfHourlySeries(sample)
 
-            val result = when {
-                ratesCoverWindow(sample, endMs, expectedCount) -> Result.success(Unit)
-                sample.isEmpty() -> fetchAndPersistAgilePrices(
+            val result = when (loadPlan(sample, endMs, expectedCount)) {
+                RateCoverage.Load.NONE -> Result.success(Unit)
+                // Nothing cached, or a daily/multi-period tariff whose cached
+                // periods stop before the window end: Octopus publishes future
+                // periods in batches, so (re)fetch the window. Rows are replaced
+                // on (validFrom, tariffCode), so this never duplicates them.
+                RateCoverage.Load.FETCH_WINDOW -> fetchAndPersistAgilePrices(
                     productCode = segment.productCode,
                     tariffCode = tariffCode,
                     start = fetchStart,
                     end = fetchEnd
                 )
                 // Partial half-hourly data — fill only the missing blocks.
-                halfHourly -> {
+                RateCoverage.Load.FILL_GAPS -> {
                     fillAgilePriceGaps(segment.productCode, tariffCode, fetchStart, fetchEnd)
                     Result.success(Unit)
                 }
-                // A daily/multi-period tariff whose cached periods stop before
-                // the window end: Octopus publishes future periods in batches,
-                // so refetch the window. Rows are replaced on (validFrom,
-                // tariffCode), so a refetch never duplicates them.
-                else -> fetchAndPersistAgilePrices(
-                    productCode = segment.productCode,
-                    tariffCode = tariffCode,
-                    start = fetchStart,
-                    end = fetchEnd
-                )
             }
 
             // Only claim coverage when the window really is complete; otherwise
             // remember the attempt purely to throttle the next retry.
-            val complete = ratesCoverWindow(
+            val complete = loadPlan(
                 agilePriceDao.queryRangeForTariff(tariffCode, startMs, endMs),
                 endMs,
                 expectedCount
-            )
+            ) == RateCoverage.Load.NONE
             priceCoverage[tariffCode] = if (result.isSuccess && complete) {
                 Coverage(fetchStart, fetchEnd, now)
             } else {
