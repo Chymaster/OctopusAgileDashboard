@@ -37,6 +37,8 @@ data class FuturePricesUiState(
     val isLoadingOlder: Boolean = false,
     /** Earliest date currently loaded — used to know where to extend from. */
     val loadedStartDay: LocalDate? = null,
+    /** Last date the observed window covers — advances at midnight. */
+    val loadedEndDay: LocalDate? = null,
     /** When non-null, the UI should scroll to this date's section. */
     val scrollTargetDate: LocalDate? = null,
     /** Tariff in force right now (drives the screen title). */
@@ -89,6 +91,28 @@ class FuturePricesViewModel @Inject constructor(
         dataJob = loadData()
     }
 
+    /**
+     * Re-checks the published tail on user action — returning to the screen or
+     * the app — and rolls the observed window forward at midnight. Completeness
+     * is derived from the cached rows, so this fetches only what Octopus has
+     * published since the last load; a covered window costs no network call.
+     */
+    fun revalidate() {
+        viewModelScope.launch {
+            val today = LocalDate.now(londonZone)
+            val endDay = today.plusDays(2)
+            if (_uiState.value.loadedEndDay != endDay) {
+                _uiState.update { it.copy(loadedEndDay = endDay) }
+            }
+            val startDay = _uiState.value.loadedStartDay ?: today.minusDays(2)
+            repository.getAgilePrices(
+                startDay.atStartOfDay(londonZone).toInstant(),
+                endDay.atStartOfDay(londonZone).toInstant(),
+                force = true
+            )
+        }
+    }
+
     private fun loadData(): Job {
         return viewModelScope.launch {
             _uiState.update { it.copy(isRefreshing = true, error = null) }
@@ -98,8 +122,9 @@ class FuturePricesViewModel @Inject constructor(
             val initialStart = now.minusDays(2).atStartOfDay(londonZone).toInstant()
             val futureEnd = now.plusDays(2).atStartOfDay(londonZone).toInstant()
 
-            // Load from repository (Room-first, API only if empty)
-            repository.getAgilePrices(initialStart, futureEnd).onFailure { e ->
+            // Load from the repository. User action: always re-check the tail,
+            // but only the part Octopus has published since the last load.
+            repository.getAgilePrices(initialStart, futureEnd, force = true).onFailure { e ->
                 _uiState.update { it.copy(error = e.toUserMessage()) }
             }
 
@@ -110,15 +135,24 @@ class FuturePricesViewModel @Inject constructor(
                 android.util.Log.w("FuturePricesVM", "Failed to fetch flexible price", e)
             }
 
-            _uiState.update { it.copy(loadedStartDay = now.minusDays(2)) }
+            _uiState.update {
+                it.copy(
+                    loadedStartDay = now.minusDays(2),
+                    loadedEndDay = now.plusDays(2)
+                )
+            }
 
             // Observe prices from repository — the range dynamically expands
-            // when loadedStartDay changes (via loadOlderPrices or jumpToDate).
+            // when loadedStartDay changes (via loadOlderPrices or jumpToDate)
+            // and rolls forward when loadedEndDay advances at midnight.
             _uiState
                 .flatMapLatest { state ->
                     val startDay = state.loadedStartDay ?: now.minusDays(2)
-                    val startInstant = startDay.atStartOfDay(londonZone).toInstant()
-                    repository.observeAgilePrices(startInstant, futureEnd)
+                    val endDay = state.loadedEndDay ?: now.plusDays(2)
+                    repository.observeAgilePrices(
+                        startDay.atStartOfDay(londonZone).toInstant(),
+                        endDay.atStartOfDay(londonZone).toInstant()
+                    )
                 }
                 .distinctUntilChanged()
                 .collectLatest { prices ->

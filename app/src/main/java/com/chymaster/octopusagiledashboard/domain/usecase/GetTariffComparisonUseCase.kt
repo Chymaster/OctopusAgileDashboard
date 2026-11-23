@@ -59,7 +59,7 @@ class GetTariffComparisonUseCase @Inject constructor(
 
             coroutineScope {
                 // Already normalised to one rate per slot by the repository.
-                val currentPricesDeferred = async { repository.getAgilePrices(start, end) }
+                val currentPricesDeferred = async { repository.getAgilePrices(start, end, force = true) }
                 val consumptionDeferred = async { repository.getConsumption(start, end) }
                 val currentChargesDeferred = async {
                     val refresh = repository.refreshStandingCharges(start, end)

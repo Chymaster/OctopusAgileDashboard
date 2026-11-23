@@ -6,21 +6,22 @@ import java.time.Instant
 /**
  * Turns published unit rates into one price per half-hour slot.
  *
- * Rate lookup uses "the greatest `validFrom` ≤ slot" for the tariff active in
- * that slot, deliberately ignoring `validTo`: Agile publishes a rate per slot,
- * while Flexible/Cosy-style tariffs publish a daily (or longer) rate whose
- * `valid_to` the API may omit — the mapper synthesises a 30-minute end for
- * those, so a `validTo` window would mis-handle them. Cross-tariff leakage is
- * prevented by requiring the row's `tariffCode` to match the slot's tariff.
+ * A row prices only the slots its validity window covers
+ * (`validFrom ≤ slot < validTo`); a row whose end the API never published
+ * ([OPEN_ENDED_MILLIS]) covers every later slot. Slots after the last
+ * published period are left unpriced rather than repeating a stale rate —
+ * Octopus publishes ahead only a day or so, and a price the API has not
+ * published is not a price we can show. Cross-tariff leakage is prevented by
+ * requiring the row's `tariffCode` to match the slot's tariff.
  */
 object SlotRateSelector {
 
     private const val SLOT_MILLIS = TariffScheduleResolver.SLOT_MILLIS
 
     /**
-     * Single-tariff variant: maps every slot start in `[start, end)` to the
-     * rate in force then. Used for a comparison tariff, which is a single
-     * product for the whole range.
+     * Single-tariff variant: maps each slot start in `[start, end)` that a
+     * published rate covers to that rate. Used for a comparison tariff, which
+     * is a single product for the whole range.
      */
     fun buildSlotPriceMap(
         rates: List<AgilePrice>,
@@ -35,7 +36,9 @@ object SlotRateSelector {
         var t = start
         while (t.isBefore(end)) {
             while (index + 1 < sorted.size && !sorted[index + 1].validFrom.isAfter(t)) index++
-            if (index >= 0) map[t.toEpochMilli()] = sorted[index].priceIncVat
+            if (index >= 0 && t.isBefore(sorted[index].validTo)) {
+                map[t.toEpochMilli()] = sorted[index].priceIncVat
+            }
             t = t.plusMillis(slotMillis)
         }
         return map
@@ -51,10 +54,11 @@ object SlotRateSelector {
             .associate { it.validFrom.toEpochMilli() to it.priceIncVat }
 
     /**
-     * Emits exactly one [AgilePrice] per slot in [slotTariffs], carrying the
-     * tariff code that produced it. Slots whose tariff has no published rate at
-     * or before the slot are omitted — the neighbouring tariff is never
-     * borrowed to fill them.
+     * Emits exactly one [AgilePrice] per priced slot in [slotTariffs], carrying
+     * the tariff code that produced it. Slots whose tariff has no published
+     * rate covering them — before the first period, inside a hole, or after
+     * the last period — are omitted; the neighbouring tariff or period is
+     * never borrowed to fill them.
      */
     fun selectSlotRates(
         rates: List<AgilePrice>,
@@ -80,6 +84,9 @@ object SlotRateSelector {
             cursors[tariffCode] = index
             if (index < 0) continue
             val rate = list[index]
+            // The newest row starting at or before the slot has already ended:
+            // nothing is published for this slot, so leave it unpriced.
+            if (!slot.isBefore(rate.validTo)) continue
             out.add(
                 AgilePrice(
                     validFrom = slot,

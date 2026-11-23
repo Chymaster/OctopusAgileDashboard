@@ -28,12 +28,19 @@ interface OctopusRepository {
     /**
      * Get agile prices for [start]..[end].
      *
-     * Tiered cache: in-memory → Room (with gap detection) → API.
-     * If Room has partial data, missing half-hour slots are fetched from
-     * the API and persisted before returning.
+     * Rates are derived from the cache, which is extended only where published
+     * data is missing: a fetch resumes from the cache's "available through"
+     * instant, so a slot that already has valid data is never downloaded again.
+     * [force] bypasses the background retry throttle — pass true for
+     * user-initiated loads and refreshes.
+     *
      * Returns [Result.failure] with an [ApiError] on API/network failure.
      */
-    suspend fun getAgilePrices(start: Instant, end: Instant): Result<List<AgilePrice>>
+    suspend fun getAgilePrices(
+        start: Instant,
+        end: Instant,
+        force: Boolean = false
+    ): Result<List<AgilePrice>>
 
     suspend fun getConsumption(start: Instant, end: Instant): Result<List<ConsumptionRecord>>
 

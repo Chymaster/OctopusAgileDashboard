@@ -32,6 +32,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
@@ -52,9 +53,12 @@ import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import com.chymaster.octopusagiledashboard.domain.model.AgilePrice
 import com.chymaster.octopusagiledashboard.ui.components.ErrorState
 import com.chymaster.octopusagiledashboard.ui.components.LoadingState
@@ -88,6 +92,21 @@ fun FuturePricesScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val listState = rememberLazyListState()
+
+    // Re-check newly published rates when the screen or app returns to the
+    // foreground. Refresh is user-driven — there are no timers. The first
+    // resume is the initial load, so only later ones revalidate.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var hasResumed by remember { mutableStateOf(false) }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                if (hasResumed) viewModel.revalidate() else hasResumed = true
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     // Group prices by date
     val groupedPrices = remember(uiState.prices) {

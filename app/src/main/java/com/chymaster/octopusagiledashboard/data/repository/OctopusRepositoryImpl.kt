@@ -25,6 +25,8 @@ import com.chymaster.octopusagiledashboard.domain.model.HalfHourPoint
 import com.chymaster.octopusagiledashboard.domain.model.StandingCharge
 import com.chymaster.octopusagiledashboard.domain.model.TariffOption
 import com.chymaster.octopusagiledashboard.domain.model.TariffSegment
+import com.chymaster.octopusagiledashboard.domain.tariff.PaymentMethodPreference
+import com.chymaster.octopusagiledashboard.domain.tariff.RateCoverage
 import com.chymaster.octopusagiledashboard.domain.tariff.SlotRateSelector
 import com.chymaster.octopusagiledashboard.domain.tariff.TariffScheduleResolver
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -72,14 +74,8 @@ class OctopusRepositoryImpl @Inject constructor(
     /** Unit rates for every tariff currently cached, keyed by (validFrom, tariffCode). */
     private val _agilePrices = MutableStateFlow<List<AgilePriceEntity>>(emptyList())
 
-    /** Window of rates already fetched, per tariff code. */
-    private data class Coverage(
-        val start: Instant,
-        val end: Instant,
-        val attemptedAt: Instant
-    )
-
-    private val priceCoverage = ConcurrentHashMap<String, Coverage>()
+    /** Last fetch attempt per tariff, used only to throttle background retries. */
+    private val priceFetchAttempts = ConcurrentHashMap<String, Instant>()
 
     /** One mutex per tariff so concurrent callers fetch each tariff at most once. */
     private val priceFetchMutexes = ConcurrentHashMap<String, Mutex>()
@@ -112,10 +108,8 @@ class OctopusRepositoryImpl @Inject constructor(
         private const val FLEXIBLE_CACHE_TTL_SECONDS = 7L * 24 * 3600
         /** 30 minutes in milliseconds — the half-hour slot interval. */
         private const val HALF_HOUR_MILLIS = 1_800_000L
-        /** Don't re-attempt a rate fetch that returned nothing for this long. */
+        /** Don't re-attempt an incomplete rate fetch for this long (background calls). */
         private const val PRICE_FETCH_RETRY_SECONDS = 30L * 60
-        /** Coverage of a window that reaches into the future expires this fast. */
-        private const val PRICE_COVERAGE_TTL_SECONDS = 15L * 60
     }
 
     // ── Public API: observe ──────────────────────────────────────────
@@ -214,11 +208,16 @@ class OctopusRepositoryImpl @Inject constructor(
      * rate per half-hour slot.
      *
      * The effective [TariffSchedule] is clipped to the range; each tariff's
-     * rates are then loaded with the tiered strategy (in-memory coverage →
-     * Room → API), fetched with a lookback so a daily rate that started before
-     * the range still prices its first slot.
+     * rates are then loaded with the interval-based strategy (rows overlapping
+     * the range → fetch only the uncovered tail). [force] bypasses the
+     * background retry throttle so a user-initiated refresh always re-checks
+     * what Octopus has published since.
      */
-    override suspend fun getAgilePrices(start: Instant, end: Instant): Result<List<AgilePrice>> {
+    override suspend fun getAgilePrices(
+        start: Instant,
+        end: Instant,
+        force: Boolean
+    ): Result<List<AgilePrice>> {
         return withContext(Dispatchers.IO) {
             try {
                 val schedule = tariffScheduleRepository.get()
@@ -231,15 +230,17 @@ class OctopusRepositoryImpl @Inject constructor(
                 var anySuccess = false
                 var lastFailure: Throwable? = null
                 for (segment in segments) {
-                    val result = ensureRates(segment, isDemo)
+                    val result = ensureRates(segment, isDemo, force)
                     if (result.isSuccess) anySuccess = true else lastFailure = result.exceptionOrNull()
                 }
 
+                // Overlap, not `validFrom >= start`: a period that began before
+                // the range (a daily rate, Flexible's open-ended quarterly rate)
+                // prices its first slot.
                 val codes = segments.map { it.tariffCode }.distinct()
-                val lookbackStart = start.minusSeconds(Constants.RATE_FETCH_LOOKBACK_SECONDS)
                 val rows = agilePriceDao.queryRangeForTariffs(
                     codes,
-                    lookbackStart.toEpochMilli(),
+                    start.toEpochMilli(),
                     end.toEpochMilli()
                 )
                 mergeAndEmitAgilePrices(rows)
@@ -261,39 +262,50 @@ class OctopusRepositoryImpl @Inject constructor(
     }
 
     /**
-     * Makes sure the rates for [segment]'s tariff are cached over the segment
-     * (plus the lookback), fetching only when coverage is missing.
+     * What still has to be fetched so [rows] describe their tariff's rates up
+     * to [endMs]. Shapes the fetch decision only — see [RateCoverage.plan].
+     */
+    private fun loadPlan(
+        rows: List<AgilePriceEntity>,
+        startMs: Long,
+        endMs: Long,
+        expectedCount: Int
+    ): RateCoverage.Load =
+        RateCoverage.plan(
+            rows.map { RateCoverage.Period(it.validFrom, it.validTo) },
+            startMs,
+            endMs,
+            expectedCount
+        )
+
+    /**
+     * Makes sure the rates for [segment]'s tariff are cached over the segment,
+     * fetching only the part that is not already covered by published rows.
+     *
+     * Completeness is derived from the cached rows themselves, so it survives
+     * process death and cannot drift: a user-initiated refresh ([force]) only
+     * re-checks the uncovered tail and never re-downloads a range that already
+     * has valid data.
      */
     private suspend fun ensureRates(
         segment: TariffSegment,
-        isDemo: Boolean
+        isDemo: Boolean,
+        force: Boolean
     ): Result<Unit> {
         val tariffCode = segment.tariffCode
-        val fetchStart = segment.start.minusSeconds(Constants.RATE_FETCH_LOOKBACK_SECONDS)
         val fetchEnd = segment.end
-        val startMs = fetchStart.toEpochMilli()
+        val startMs = segment.start.toEpochMilli()
         val endMs = fetchEnd.toEpochMilli()
 
         val mutex = priceFetchMutexes.getOrPut(tariffCode) { Mutex() }
         return mutex.withLock {
             val now = Instant.now()
-            val coverage = priceCoverage[tariffCode]
-            val covered = coverage != null &&
-                !fetchStart.isBefore(coverage.start) &&
-                !fetchEnd.isAfter(coverage.end)
-            // A window that reaches into the future can gain rates later (Agile
-            // publishes a day ahead), so its coverage expires quickly. Historical
-            // windows never change.
-            val coveredFresh = covered && (!fetchEnd.isAfter(now) ||
-                java.time.Duration.between(coverage!!.attemptedAt, now).seconds <
-                PRICE_COVERAGE_TTL_SECONDS)
-            if (coveredFresh) {
-                return@withLock Result.success(Unit)
-            }
             // A window that recently produced nothing is not retried on every
-            // call (historical ranges with no rates, offline, etc.).
-            if (coverage != null &&
-                java.time.Duration.between(coverage.attemptedAt, now).seconds <
+            // call (publication lag, offline, ranges with no rates). User
+            // action always re-checks the tail.
+            val lastAttempt = priceFetchAttempts[tariffCode]
+            if (!force && lastAttempt != null &&
+                java.time.Duration.between(lastAttempt, now).seconds <
                 PRICE_FETCH_RETRY_SECONDS
             ) {
                 return@withLock Result.success(Unit)
@@ -301,7 +313,7 @@ class OctopusRepositoryImpl @Inject constructor(
 
             if (isDemo) {
                 val generated = DemoDataGenerator.generateAgilePriceEntities(
-                    fetchStart, fetchEnd, tariffCode
+                    segment.start, fetchEnd, tariffCode
                 )
                 // Drop any stale off-grid rows written by older demo versions so
                 // they can't linger as duplicates or skew Room's range counts.
@@ -310,48 +322,44 @@ class OctopusRepositoryImpl @Inject constructor(
                 // Real API rates are always grid-aligned, so clearing off-grid
                 // rows from the in-memory cache is safe.
                 _agilePrices.value = _agilePrices.value.filter { it.validFrom % HALF_HOUR_MILLIS == 0L }
-                priceCoverage[tariffCode] = Coverage(fetchStart, fetchEnd, now)
                 return@withLock Result.success(Unit)
             }
 
             val expectedCount = ((endMs - startMs) / HALF_HOUR_MILLIS).toInt()
-            val sample = agilePriceDao.queryRangeForTariff(tariffCode, startMs, endMs)
-            val actualCount = sample.size
-            // A tariff that publishes one rate per half-hour needs every slot;
-            // a daily/fixed tariff legitimately has far fewer rows, so its
-            // "missing" slots are not gaps.
-            val isHalfHourlySeries = sample.isNotEmpty() && sample.all {
-                it.validTo - it.validFrom <= 2 * HALF_HOUR_MILLIS
-            }
+            if (expectedCount <= 0) return@withLock Result.success(Unit)
 
-            val result = when {
-                expectedCount <= 0 -> Result.success(Unit)
-                actualCount >= expectedCount -> Result.success(Unit)
-                actualCount == 0 -> fetchAndPersistAgilePrices(
+            val rows = agilePriceDao.queryRangeForTariff(tariffCode, startMs, endMs)
+
+            val result = when (val load = loadPlan(rows, startMs, endMs, expectedCount)) {
+                RateCoverage.Load.None -> Result.success(Unit)
+                // The cache's "available through" date: fetch only from there,
+                // so slots that already have valid data are never downloaded
+                // again. Rows are replaced on (validFrom, tariffCode).
+                is RateCoverage.Load.Fetch -> fetchAndPersistAgilePrices(
                     productCode = segment.productCode,
                     tariffCode = tariffCode,
-                    start = fetchStart,
+                    start = Instant.ofEpochMilli(load.fromMillis),
                     end = fetchEnd
                 )
-                !isHalfHourlySeries -> Result.success(Unit)
-                else -> {
-                    // Partial half-hourly data — fill only the missing blocks.
-                    fillAgilePriceGaps(segment.productCode, tariffCode, fetchStart, fetchEnd)
+                // Partial half-hourly data — fill only the missing blocks.
+                RateCoverage.Load.FillGaps -> {
+                    fillAgilePriceGaps(segment.productCode, tariffCode, segment.start, fetchEnd)
                     Result.success(Unit)
                 }
             }
 
-            // Only claim coverage when the window really is complete; otherwise
-            // remember the attempt purely to throttle the next retry.
-            val complete = if (isHalfHourlySeries) {
-                agilePriceDao.countInRangeForTariff(tariffCode, startMs, endMs) >= expectedCount
+            // Throttle only while something is still missing; a complete window
+            // must never be blocked by an attempt timestamp.
+            val stillIncomplete = loadPlan(
+                agilePriceDao.queryRangeForTariff(tariffCode, startMs, endMs),
+                startMs,
+                endMs,
+                expectedCount
+            ) != RateCoverage.Load.None
+            if (result.isFailure || stillIncomplete) {
+                priceFetchAttempts[tariffCode] = now
             } else {
-                true
-            }
-            priceCoverage[tariffCode] = if (result.isSuccess && complete) {
-                Coverage(fetchStart, fetchEnd, now)
-            } else {
-                Coverage(fetchEnd, fetchStart, now)
+                priceFetchAttempts.remove(tariffCode)
             }
             result
         }
@@ -461,7 +469,7 @@ class OctopusRepositoryImpl @Inject constructor(
         withContext(Dispatchers.IO) {
             // Clear the agile price in-memory cache + Room
             _agilePrices.value = emptyList()
-            priceCoverage.clear()
+            priceFetchAttempts.clear()
             priceFetchMutexes.clear()
             agilePriceDao.deleteAll()
             // Clear consumption in-memory cache + Room
@@ -564,7 +572,11 @@ class OctopusRepositoryImpl @Inject constructor(
                         continue
                     }
 
-                    val rates = response.body()?.results ?: continue
+                    val rates = PaymentMethodPreference.keepPreferred(
+                        response.body()?.results ?: continue,
+                        rateStart = { it.validFrom },
+                        paymentMethod = { it.paymentMethod }
+                    )
                     val current = rates.firstOrNull { rate ->
                         val validFromInstant = OffsetDateTime.parse(rate.validFrom).toInstant()
                         if (validFromInstant > now) return@firstOrNull false
@@ -772,8 +784,11 @@ class OctopusRepositoryImpl @Inject constructor(
                         periodTo = endStr
                     )
                 }
-                val rates = dedupeRatesByPaymentMethod(dtoRates)
-                    .map { it.toDomain(tariffCode) }
+                val rates = PaymentMethodPreference.keepPreferred(
+                    dtoRates,
+                    rateStart = { it.validFrom },
+                    paymentMethod = { it.paymentMethod }
+                ).map { it.toDomain(tariffCode) }
                     .sortedBy { it.validFrom }
                 Result.success(rates)
             } catch (e: kotlinx.coroutines.CancellationException) {
@@ -807,8 +822,11 @@ class OctopusRepositoryImpl @Inject constructor(
                         periodTo = endStr
                     )
                 }
-                val charges = dedupeStandingChargesByPaymentMethod(dtoCharges)
-                    .map { it.toDomain(tariffCode) }
+                val charges = PaymentMethodPreference.keepPreferred(
+                    dtoCharges,
+                    rateStart = { it.validFrom },
+                    paymentMethod = { it.paymentMethod }
+                ).map { it.toDomain(tariffCode) }
                     .sortedBy { it.validFrom }
                 Result.success(charges)
             } catch (e: kotlinx.coroutines.CancellationException) {
@@ -873,8 +891,12 @@ class OctopusRepositoryImpl @Inject constructor(
         end: Instant
     ): Result<Unit> {
         return try {
-            val allRates = fetchPublicAgilePrices(productCode, tariffCode, start, end)
-            val entities = allRates.map { it.toEntity(tariffCode) }
+            val fetched = PaymentMethodPreference.keepPreferred(
+                fetchPublicAgilePrices(productCode, tariffCode, start, end),
+                rateStart = { it.validFrom },
+                paymentMethod = { it.paymentMethod }
+            )
+            val entities = fetched.map { it.toEntity(tariffCode) }
             agilePriceDao.insertAll(entities)
             preferencesRepository.saveLastPricesRefresh(System.currentTimeMillis())
             Result.success(Unit)
@@ -956,30 +978,6 @@ class OctopusRepositoryImpl @Inject constructor(
 
         return all
     }
-
-    /**
-     * Collapse overlapping unit-rate entries that cover the same slot into a
-     * single rate, preferring DIRECT_DEBIT (e.g. Flexible Octopus returns both
-     * a DIRECT_DEBIT and a NON_DIRECT_DEBIT rate for the same period). The
-     * domain model drops `paymentMethod`, so this must happen before mapping.
-     */
-    private fun dedupeRatesByPaymentMethod(rates: List<AgileRateDto>): List<AgileRateDto> =
-        rates.groupBy { it.validFrom }.values.map { group ->
-            group.firstOrNull { it.paymentMethod == "DIRECT_DEBIT" }
-                ?: group.firstOrNull { it.paymentMethod == null }
-                ?: group.first()
-        }
-
-    /**
-     * Same payment-method collapse as [dedupeRatesByPaymentMethod] but for
-     * standing charges (Flexible also returns DD / non-DD variants).
-     */
-    private fun dedupeStandingChargesByPaymentMethod(charges: List<StandingChargeDto>): List<StandingChargeDto> =
-        charges.groupBy { it.validFrom }.values.map { group ->
-            group.firstOrNull { it.paymentMethod == "DIRECT_DEBIT" }
-                ?: group.firstOrNull { it.paymentMethod == null }
-                ?: group.first()
-        }
 
     // ── Consumption private helpers ─────────────────────────────────
 

@@ -417,10 +417,10 @@ UI auto-updates when refresh writes to caches
 ```
 
 **Key points:**
-- **A background refresh is always triggered**, even when the in-memory cache or Room already has data for the new range. There is no cache-coverage check before calling `refreshDashboardDataUseCase()`.
+- **A background refresh is always triggered**, even when the in-memory cache or Room already has data for the new range. There is no cache-coverage check in the ViewModel before calling `refreshDashboardDataUseCase()`; the repository's row-derived coverage decides whether the call reaches the network.
 - **Cached data appears immediately** from the in-memory StateFlow while the background refresh runs.
 - **Consumption and standing charges are always force-refreshed** from the API — `refreshFromApi()` does not short-circuit based on cache state.
-- **For agile prices**, `getAgilePrices()` does check: in-memory cache → Room → API (only if Room is empty for the range).
+- **For agile prices**, `getAgilePrices()` derives coverage from the cached rows (interval overlap, tariff shape) and fetches only the uncovered tail — a complete range costs no network call.
 
 ### Consumption Gap-Filling Behavior
 

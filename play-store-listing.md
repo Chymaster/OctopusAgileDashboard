@@ -38,27 +38,26 @@ Curious how green your electricity is right now? A real-time donut chart shows t
 Connect your Octopus Energy account to unlock detailed historical analysis:
 • Total cost, usage, and average price over any time range (7 days, 1 month, 6 months, 1 year, or custom dates)
 • Dual-axis chart combining price bars with your actual consumption line — both colour-coded into green/amber/red price zones
+• Automatically detects which Octopus tariff you are on — and which one you were on before — and prices every half-hour with the tariff that was actually in force at the time
+• Tariff changes inside a range are marked on the chart, so you can see exactly where a switch happened
 • Calendar-aligned bins (daily for 7D, monthly for 6M/1Y) so bars align with natural billing periods
 • Cost chart with stacked zone-breakdown bars showing how much you spent in cheap, moderate, and expensive price bands
 • Cost breakdown with donut chart separating usage costs from standing charges, plus per-zone usage cost split
 • Usage zone analysis showing how much of your consumption fell in each price band
 
 **💷 Tariff Comparison**
-Wondering if you're on the right tariff? Compare what you actually paid against other Octopus tariffs over any time range, and see how much you would have saved — or lost. Tap any bar for a full breakdown of savings and usage, switch the chart between total saving, average unit saving, and usage, and browse both currently available and historical tariffs with a built-in search. Tap the total saving figure to compare your current plan against another side by side.
+Wondering if you're on the right tariff? Compare what you actually paid against other Octopus tariffs over any time range, and see how much you would have saved — or lost. The comparison uses your real tariff history, so a range that spans a switch is compared exactly as it was billed. Tap any bar for a full breakdown of savings and usage, switch the chart between total saving, average unit saving, and usage, and browse both currently available and historical tariffs with a built-in search. Tap the total saving figure to compare your current plan against another side by side.
 
 **🔮 Future Prices**
 Plan ahead with a full price schedule up to 2 days in the future. Prices are grouped by date with the current slot highlighted, so you can find the best time to charge your EV, run your heat pump, or do the laundry.
 
 **⚙️ Fully Configurable**
 • Adjust the green/amber and amber/red price thresholds to match your own definition of "cheap"
+• Your tariff is detected automatically from your account; a manual override is there if you need it
 • Supports all UK distribution regions
 • Works without entering any credentials — public price data is free for everyone
 
 ## What's new
 
-• Future Prices: horizontal price bars anchored at zero, now including negative prices
-• Tariff Comparison: tap any bar for a detailed savings and usage breakdown
-• Tariff Comparison: choose what the bars show — total saving, average unit saving, or usage
-• Tariff Comparison: browse and search historical tariffs
-• Tap Total Saving on Tariff Comparison for a side-by-side plan comparison
-• Fixed demo prices duplicating on refresh
+• Fixes Future Prices showing a flat standard rate (no peak or off-peak windows) on Cosy and other multi-rate tariffs, for days after a tariff switch
+• Future Prices now reloads newly published prices for daily and multi-period tariffs as soon as Octopus releases them

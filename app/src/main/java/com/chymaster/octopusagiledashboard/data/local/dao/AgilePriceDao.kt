@@ -17,10 +17,14 @@ interface AgilePriceDao {
     @Query("SELECT * FROM agile_prices WHERE validFrom >= :startMillis AND validTo <= :endMillis ORDER BY validFrom ASC")
     suspend fun queryRange(startMillis: Long, endMillis: Long): List<AgilePriceEntity>
 
-    /** Rates for one tariff over the range. */
+    /**
+     * Rates for one tariff overlapping the range. Overlap (not `validFrom >=`)
+     * is required: a period that began before the range — a daily rate, or
+     * Flexible's open-ended quarterly rate — prices the range's first slot.
+     */
     @Query(
         "SELECT * FROM agile_prices WHERE tariffCode = :tariffCode " +
-            "AND validFrom >= :startMillis AND validFrom < :endMillis ORDER BY validFrom ASC"
+            "AND validFrom < :endMillis AND validTo > :startMillis ORDER BY validFrom ASC"
     )
     suspend fun queryRangeForTariff(
         tariffCode: String,
@@ -28,10 +32,10 @@ interface AgilePriceDao {
         endMillis: Long
     ): List<AgilePriceEntity>
 
-    /** Rates for any of [tariffCodes] over the range (multi-tariff history). */
+    /** Rates for any of [tariffCodes] overlapping the range (multi-tariff history). */
     @Query(
         "SELECT * FROM agile_prices WHERE tariffCode IN (:tariffCodes) " +
-            "AND validFrom >= :startMillis AND validFrom < :endMillis ORDER BY validFrom ASC"
+            "AND validFrom < :endMillis AND validTo > :startMillis ORDER BY validFrom ASC"
     )
     suspend fun queryRangeForTariffs(
         tariffCodes: List<String>,

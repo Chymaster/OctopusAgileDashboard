@@ -62,18 +62,36 @@ never read.
 
 ## Prices (`OctopusRepositoryImpl`)
 
-`getAgilePrices(start, end)` clips the schedule to the range and, per segment
-(per tariff), loads rates with the tiered strategy: in-memory coverage → Room
-count → API. Rates are fetched over `[segment.start − 25 h, segment.end)` so a
-daily rate that started before the range still prices its first slot, and are
-stored keyed by `(validFrom, tariffCode)`.
+`getAgilePrices(start, end, force)` clips the schedule to the range and, per
+segment (per tariff), loads rates from Room. A rate is an **interval** and may
+be open-ended: the API omits `valid_to` for the period still in force (e.g.
+Flexible's current quarter), which is stored as `OPEN_ENDED_MILLIS` so the NOT
+NULL cache column needs no migration.
+
+Reads are **overlap** queries (`validFrom < end AND validTo > start`), so a
+period that began before the range still prices its first slot. Completeness is
+derived from the cached rows themselves (`RateCoverage.plan`), not from an
+in-memory claim:
+
+- a half-hourly series (Agile) is complete when every slot is present; holes
+  are gap-filled;
+- a multi-period series (Cosy, fixed, Flexible) is complete when its periods
+  tile the window with no interior gap; an open-ended period covers the rest.
+  Otherwise the fetch resumes from the first uncovered instant — the cache's
+  "available through" date — so slots that already have valid data are never
+  downloaded again.
+
+`force` bypasses the background retry throttle (30 min). Screen entry and
+refresh pass it, so user action always re-checks what Octopus has published
+since; there is no timer.
 
 The returned series is **normalised to one rate per half-hour slot**
-(`SlotRateSelector.selectSlotRates`), carrying the tariff code that produced it.
-Rate lookup uses "the greatest `validFrom` ≤ slot" for that slot's tariff,
-deliberately ignoring `validTo` — the mapper synthesises a 30-minute end for
-open-ended daily rates. A slot whose tariff has no published rate is omitted;
-the neighbouring tariff's rate is never borrowed.
+(`SlotRateSelector`), carrying the tariff code that produced it. A slot is
+priced only if a row covers it (`validFrom ≤ slot < validTo`); slots after the
+last published period are omitted rather than repeating a stale rate, and the
+neighbouring tariff's rate is never borrowed. Overlapping
+`DIRECT_DEBIT` / `NON_DIRECT_DEBIT` rows are collapsed before caching,
+preferring direct debit (`PaymentMethodPreference`).
 
 Room schema v3 (from v2) is migrated, not dropped: `agile_prices` and
 `standing_charges` gain a composite key `(validFrom, tariffCode)`. The
