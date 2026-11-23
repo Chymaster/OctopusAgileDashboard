@@ -58,9 +58,6 @@ object Constants {
     const val TARIFF_SCHEDULE_TTL_SECONDS = 12L * 3600
     /** Minimum gap between detection attempts after a failure. */
     const val TARIFF_SCHEDULE_RETRY_SECONDS = 120L
-    /** Lookback applied when fetching unit rates, so a daily rate that started
-     *  before the requested range still prices its first slot. */
-    const val RATE_FETCH_LOOKBACK_SECONDS = 25L * 3600
     /** Lookback applied when fetching standing charges (pence per day). */
     const val STANDING_CHARGE_FETCH_LOOKBACK_SECONDS = 2L * 24 * 3600
 

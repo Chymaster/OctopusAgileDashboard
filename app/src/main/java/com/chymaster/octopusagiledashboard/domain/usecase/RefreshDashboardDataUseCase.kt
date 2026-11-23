@@ -11,12 +11,20 @@ class RefreshDashboardDataUseCase @Inject constructor(
     private val repository: OctopusRepository,
     private val tariffScheduleRepository: TariffScheduleRepository
 ) {
-    suspend operator fun invoke(start: Instant, end: Instant): Result<Unit> {
+    /**
+     * [force] bypasses the repository's background retry throttle — dashboard
+     * loads and refreshes are user action, so they always re-check the tail.
+     */
+    suspend operator fun invoke(
+        start: Instant,
+        end: Instant,
+        force: Boolean = true
+    ): Result<Unit> {
         return coroutineScope {
             // Re-check the tariff history first (TTL-gated): a switch since the
             // last load changes which rates the range needs.
             val scheduleResult = async { tariffScheduleRepository.get() }
-            val pricesResult = async { repository.getAgilePrices(start, end) }
+            val pricesResult = async { repository.getAgilePrices(start, end, force) }
             val standingChargesResult = async { repository.refreshStandingCharges(start, end) }
 
             // Detection and standing charges are optional — don't fail if they error.
