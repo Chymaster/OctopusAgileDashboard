@@ -129,7 +129,7 @@ class HomeViewModel @Inject constructor(
             // Fetch data in parallel
             coroutineScope {
                 val pricesJob = async {
-                    repository.getAgilePrices(start, end)
+                    repository.getAgilePrices(start, end, force = true)
                 }
                 val flexibleJob = async {
                     repository.fetchFlexiblePrice()

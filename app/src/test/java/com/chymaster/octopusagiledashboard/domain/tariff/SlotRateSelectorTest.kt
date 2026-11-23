@@ -39,8 +39,8 @@ class SlotRateSelectorTest {
     fun `single tariff slot map applies the last rate at or before each slot`() {
         val start = date(2026, 1, 15)
         val rates = listOf(
-            rate(agile, start, 10.0),
-            rate(agile, start.plusSeconds(1800), 20.0)
+            rate(agile, start, 10.0, durationMinutes = 120),
+            rate(agile, start.plusSeconds(1800), 20.0, durationMinutes = 120)
         )
         val map = SlotRateSelector.buildSlotPriceMap(rates, start, start.plusSeconds(7200))
         assertEquals(4, map.size)
@@ -91,7 +91,7 @@ class SlotRateSelectorTest {
     fun `each tariff's own rates are used across a switch`() {
         val switch = dateTime(2026, 1, 15, 12, 0)
         val rates = listOf(
-            rate(agile, switch.minusSeconds(3600), 15.0),
+            rate(agile, switch.minusSeconds(3600), 15.0, durationMinutes = 60),
             rate(cosy, switch.minusSeconds(1800), 25.0, durationMinutes = 60)
         )
         val slotTariffs = mapOf(
@@ -155,5 +155,50 @@ class SlotRateSelectorTest {
         val rates = listOf(rate(agile, start.plusSeconds(1800), 10.0))
         val slotTariffs = mapOf(start.toEpochMilli() to agile)
         assertNull(SlotRateSelector.selectSlotRates(rates, slotTariffs).firstOrNull())
+    }
+
+    @Test
+    fun `slots after the last published period are left unpriced`() {
+        // The reported bug: a 3-hour rate was repeated for every later slot,
+        // so a whole future screen showed the cheap band. Once the period ends
+        // the slots it does not cover must be omitted.
+        val start = date(2026, 1, 15)
+        val rates = listOf(rate(cosy, start, 14.0, durationMinutes = 180))
+        val slotTariffs = (0 until 10).associate {
+            (start.toEpochMilli() + it * 1_800_000L) to cosy
+        }
+        val selected = SlotRateSelector.selectSlotRates(rates, slotTariffs)
+        assertEquals(6, selected.size) // 13:00–16:00 only
+        assertEquals(start.plusSeconds(5 * 1_800), selected.last().validFrom)
+    }
+
+    @Test
+    fun `slot price map does not extend the last period`() {
+        val start = date(2026, 1, 15)
+        val map = SlotRateSelector.buildSlotPriceMap(
+            listOf(rate(cosy, start, 14.0, durationMinutes = 60)),
+            start,
+            start.plusSeconds(4 * 3600)
+        )
+        assertEquals(2, map.size) // 00:00 and 00:30 only
+    }
+
+    @Test
+    fun `an open ended rate prices every later slot`() {
+        // Flexible/quarterly: valid_to was never published.
+        val start = date(2026, 1, 15)
+        val open = AgilePrice(
+            validFrom = start.minusSeconds(86_400),
+            validTo = Instant.ofEpochMilli(OPEN_ENDED_MILLIS),
+            priceExcVat = 26.6,
+            priceIncVat = 26.6,
+            tariffCode = cosy
+        )
+        val slotTariffs = (0 until 8).associate {
+            (start.toEpochMilli() + it * 1_800_000L) to cosy
+        }
+        val selected = SlotRateSelector.selectSlotRates(listOf(open), slotTariffs)
+        assertEquals(8, selected.size)
+        assertTrue(selected.all { it.priceIncVat == 26.6 })
     }
 }
