@@ -59,5 +59,7 @@ Plan ahead with a full price schedule up to 2 days in the future. Prices are gro
 
 ## What's new
 
-• Fixes Future Prices showing a flat standard rate (no peak or off-peak windows) on Cosy and other multi-rate tariffs, for days after a tariff switch
-• Future Prices now reloads newly published prices for daily and multi-period tariffs as soon as Octopus releases them
+• Future Prices now shows only prices Octopus has actually published — a slot with no published rate is left blank instead of repeating an older one
+• Fixed Cosy, fixed-rate and Flexible tariffs showing a single price across the whole schedule
+• Prices refresh whenever you open a screen or return to the app, downloading only newly published rates
+• Direct-debit prices are now preferred when Octopus publishes both payment variants
